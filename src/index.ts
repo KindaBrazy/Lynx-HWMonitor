@@ -1,5 +1,6 @@
 import {spawn, ChildProcess} from 'child_process';
 import {EventEmitter} from 'events';
+import * as os from 'os'; // Import the 'os' module for uptime
 import {checkDotNetRuntime8} from './utils.js';
 import DownloadCli from './cli_downloader.js';
 
@@ -18,6 +19,11 @@ export type HardwareItemInfo = {
   SubHardware: HardwareItemInfo[];
 };
 
+export type UptimeInfo = {
+  rawSeconds: number;
+  formatted: string;
+};
+
 export type HardwareReport = {
   Timestamp: string; // ISO Date string
   CPU: HardwareItemInfo[];
@@ -26,6 +32,8 @@ export type HardwareReport = {
   Motherboard: HardwareItemInfo[];
   Storage: HardwareItemInfo[];
   Network: HardwareItemInfo[];
+  Uptime?: UptimeInfo; // Optional uptime information
+  ElapsedTime?: UptimeInfo; // Optional elapsed time since class creation
 };
 
 export type MonitorError = Error & {
@@ -34,24 +42,51 @@ export type MonitorError = Error & {
   stderrData?: string; // Content from stderr if available
 };
 
-export type ComponentType = 'cpu' | 'gpu' | 'memory' | 'motherboard' | 'storage' | 'network' | string;
+export type ComponentType = 'cpu' | 'gpu' | 'memory' | 'motherboard' | 'storage' | 'network' | 'uptime' | string;
 
 export default class HardwareMonitor extends EventEmitter {
   private executablePath: string = '';
   private activeProcess: ChildProcess | null = null;
   private buffer: string = '';
+  private creationTimestamp: number; // To store the timestamp when the class was created
 
   constructor() {
     super();
+    this.creationTimestamp = Date.now(); // Record creation time
+  }
+
+  /**
+   * Helper function to format seconds into a human-readable string.
+   * @param totalSeconds The total number of seconds.
+   * @returns Formatted string (e.g., "1 day, 2 hours, 3 minutes, 4 seconds").
+   */
+  private formatSeconds(totalSeconds: number): string {
+    const days = Math.floor(totalSeconds / (3600 * 24));
+    totalSeconds %= 3600 * 24;
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+
+    return parts.join(', ');
   }
 
   private buildArgs(mode: 'once' | 'timed', intervalMs?: number, components?: ComponentType[]): string[] {
     const args: string[] = ['--mode', mode];
+    // Filter out 'uptime' component as it's handled internally, not by the external CLI
+    const cliComponents = components?.filter(comp => comp !== 'uptime');
+
     if (mode === 'timed' && intervalMs !== undefined) {
       args.push('--interval', intervalMs.toString());
     }
-    if (components && components.length > 0) {
-      args.push('--components', components.join(','));
+    if (cliComponents && cliComponents.length > 0) {
+      args.push('--components', cliComponents.join(','));
     }
     return args;
   }
@@ -76,13 +111,13 @@ export default class HardwareMonitor extends EventEmitter {
 
   /**
    * Retrieves hardware data once.
-   * @param components Optional array of components to monitor (e.g., ['cpu', 'gpu']). Defaults to all.
+   * @param components Optional array of components to monitor (e.g., ['cpu', 'gpu', 'uptime']). Defaults to all.
    * @param timeoutMs Optional timeout in milliseconds for the operation. Defaults to 10000ms (10 seconds).
    * @returns A Promise resolving to the HardwareReport.
    */
   public getDataOnce(components?: ComponentType[], timeoutMs: number = 10000): Promise<HardwareReport> {
     return new Promise((resolve, reject) => {
-      console.log('exePAtj', this.executablePath);
+      console.log('exePath', this.executablePath);
       const args = this.buildArgs('once', undefined, components);
       let output = '';
       let errorOutput = '';
@@ -131,6 +166,22 @@ export default class HardwareMonitor extends EventEmitter {
         }
         try {
           const report: HardwareReport = JSON.parse(output);
+
+          // Add uptime and elapsed time if requested
+          if (components?.includes('uptime')) {
+            const osUptimeSeconds = os.uptime();
+            report.Uptime = {
+              rawSeconds: osUptimeSeconds,
+              formatted: this.formatSeconds(osUptimeSeconds),
+            };
+
+            const elapsedTimeSeconds = (Date.now() - this.creationTimestamp) / 1000;
+            report.ElapsedTime = {
+              rawSeconds: elapsedTimeSeconds,
+              formatted: this.formatSeconds(elapsedTimeSeconds),
+            };
+          }
+
           resolve(report);
         } catch (e) {
           const err: MonitorError = new Error('Failed to parse JSON output from hardware monitor.') as MonitorError;
@@ -164,14 +215,6 @@ export default class HardwareMonitor extends EventEmitter {
 
     this.activeProcess.stdout?.on('data', dataChunk => {
       this.buffer += dataChunk.toString();
-      // The .NET app writes one full JSON object then "--- Next update..."
-      // We can split by the "---" delimiter or look for complete JSON objects.
-      // A robust way is to find complete JSON objects.
-      // Assuming each JSON output is self-contained and followed by other text.
-
-      // Try to find complete JSON objects. This is a bit naive and assumes
-      // the .NET app prints one JSON and then the "--- Next update..." line.
-      // A more robust solution would involve a streaming JSON parser or a clearer delimiter.
       const potentialJsonEnd = this.buffer.lastIndexOf('}');
       if (potentialJsonEnd !== -1) {
         const potentialJsonStart = this.buffer.lastIndexOf('{', potentialJsonEnd);
@@ -179,19 +222,32 @@ export default class HardwareMonitor extends EventEmitter {
           const jsonString = this.buffer.substring(potentialJsonStart, potentialJsonEnd + 1);
           try {
             const report: HardwareReport = JSON.parse(jsonString);
+
+            // Add uptime and elapsed time if requested
+            if (components?.includes('uptime')) {
+              const osUptimeSeconds = os.uptime();
+              report.Uptime = {
+                rawSeconds: osUptimeSeconds,
+                formatted: this.formatSeconds(osUptimeSeconds),
+              };
+
+              const elapsedTimeSeconds = (Date.now() - this.creationTimestamp) / 1000;
+              report.ElapsedTime = {
+                rawSeconds: elapsedTimeSeconds,
+                formatted: this.formatSeconds(elapsedTimeSeconds),
+              };
+            }
+
             this.emit('data', report);
-            // Remove the processed part from the buffer, including anything after it up to the next potential start
             const nextSeparator = this.buffer.indexOf('--- Next update', potentialJsonEnd);
             if (nextSeparator !== -1) {
               const endOfSeparator = this.buffer.indexOf('\n', nextSeparator);
               this.buffer = endOfSeparator !== -1 ? this.buffer.substring(endOfSeparator + 1) : '';
             } else {
-              // If no separator, just clear what we parsed, or be more careful
               this.buffer = this.buffer.substring(potentialJsonEnd + 1);
             }
           } catch (e) {
             // Incomplete JSON or parse error, wait for more data or log error
-            // console.warn('HardwareMonitor: Incomplete JSON in buffer or parse error, waiting for more data.', e);
           }
         }
       }
