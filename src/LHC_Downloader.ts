@@ -127,12 +127,40 @@ function fetchJson<T>(url: string): Promise<T> {
 }
 
 /**
+ * Cleans up old versions of the CLI tool from the base directory.
+ * It removes any subdirectories that are not the current version.
+ * @param baseDir The base directory where different versions are stored.
+ * @param currentVersion The version string of the currently active CLI.
+ * @param cliName The base name of the CLI tool (e.g., 'LynxHardwareCLI').
+ */
+async function cleanupOldVersions(baseDir: string, currentVersion: string, cliName: string): Promise<void> {
+  try {
+    const entries = await fsPromises.readdir(baseDir, {withFileTypes: true});
+    const oldVersionDirs = entries.filter(
+      dirent =>
+        dirent.isDirectory() &&
+        dirent.name.startsWith(`${cliName}-`) && // Assuming version folders start with cliName-
+        dirent.name !== currentVersion, // Don't remove the current version
+    );
+
+    for (const dirent of oldVersionDirs) {
+      const oldVersionPath = path.join(baseDir, dirent.name);
+      console.log(`Removing old version directory: ${oldVersionPath}`);
+      await fsPromises.rm(oldVersionPath, {recursive: true, force: true});
+    }
+  } catch (error) {
+    // Ignore errors if the directory doesn't exist or other cleanup issues
+    console.warn(`Warning: Could not clean up old versions in ${baseDir}:`, (error as Error).message);
+  }
+}
+
+/**
  * Downloads and extracts a CLI tool from the latest GitHub release.
  *
  * @param repoOwner The owner of the GitHub repository.
  * @param repoName The name of the GitHub repository.
  * @param cliName The base name of the CLI tool.
- * @param destinationDir The directory where the CLI tool's files will be extracted.
+ * @param baseDestinationDir The base directory where the CLI tool's versions will be extracted.
  * This directory will be created if it doesn't exist.
  * @returns A promise that resolves to the path of the directory where files were extracted.
  * @throws Will throw an error if any step fails (e.g., network issue, asset not found, extraction error).
@@ -141,31 +169,8 @@ async function downloadAndExtractLatestCli(
   repoOwner: string,
   repoName: string,
   cliName: string,
-  destinationDir: string,
+  baseDestinationDir: string,
 ): Promise<string> {
-  const finalExtractionPath = path.resolve(destinationDir);
-
-  // Check if the CLI tool already exists in the destination directory
-  try {
-    const stats = await fsPromises.stat(finalExtractionPath);
-    if (stats.isDirectory()) {
-      // You might want to add a more robust check here, e.g.,
-      // check for the presence of a specific executable file or a version file
-      console.log(
-        `CLI tool '${cliName}' already appears to be extracted in '${finalExtractionPath}'. Skipping download.`,
-      );
-      return finalExtractionPath;
-    }
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      console.log(`CLI tool '${cliName}' not found in '${finalExtractionPath}'. Proceeding with download.`);
-      // Directory doesn't exist, proceed with download
-    } else {
-      console.error(`Error checking existence of ${finalExtractionPath}:`, error.message);
-      throw error; // Re-throw other errors
-    }
-  }
-
   console.log(`Starting download process for ${cliName} from ${repoOwner}/${repoName}`);
 
   // 1. Determine system platform and architecture
@@ -219,8 +224,37 @@ async function downloadAndExtractLatestCli(
     throw new Error(`No assets found in the latest release for ${repoOwner}/${repoName}.`);
   }
 
-  // 3. Construct the target asset name and find the asset
   const versionString = releaseData.tag_name;
+
+  const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
+
+  // Check if the latest version already exists
+  try {
+    const stats = await fsPromises.stat(finalExtractionPath);
+    if (stats.isDirectory()) {
+      console.log(
+        `Latest CLI tool '${cliName}' version '${versionString}' already extracted in '${finalExtractionPath}'. Skipping download.`,
+      );
+      // Clean up old versions even if the latest is already present
+      await cleanupOldVersions(baseDestinationDir, versionString, cliName);
+      return finalExtractionPath;
+    }
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      console.log(
+        `Latest CLI tool '${cliName}' version '${versionString}' not found in '${finalExtractionPath}'. Proceeding with download.`,
+      );
+      // Directory doesn't exist, proceed with download
+    } else {
+      console.error(`Error checking existence of ${finalExtractionPath}:`, error.message);
+      throw error; // Re-throw other errors
+    }
+  }
+
+  // If we reach here, the latest version needs to be downloaded/extracted
+  console.log(`New version '${versionString}' available or not found. Proceeding with download.`);
+
+  // 3. Construct the target asset name and find the asset
   const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
   console.log(`Looking for asset: ${expectedAssetName}`);
 
@@ -260,6 +294,9 @@ async function downloadAndExtractLatestCli(
     console.log(`Extracting ${zipFilePath} to ${finalExtractionPath}...`);
     await decompress(zipFilePath, finalExtractionPath);
     console.log('Extraction complete.');
+
+    // After successful extraction, clean up old versions
+    await cleanupOldVersions(baseDestinationDir, versionString, cliName);
   } catch (error) {
     console.error(`Error extracting ZIP file "${zipFilePath}" to "${finalExtractionPath}":`, (error as Error).message);
     throw new Error(`Failed to extract ${targetAsset.name} to ${finalExtractionPath}.`);
@@ -277,7 +314,8 @@ async function downloadAndExtractLatestCli(
 /**
  * Downloads and extracts the latest version of the CLI tool to the specified directory.
  *
- * @param {string} saveTo - The directory where the CLI tool should be saved.
+ * @param {string} saveTo - The base directory where the CLI tool should be saved (e.g., 'C:/Users/YourUser/AppData/Local/LynxHub/cli').
+ * Versions will be stored in subdirectories like 'LynxHardwareCLI/v1.0.0'.
  * @return {Promise<void>} A promise that resolves when the CLI tool is successfully downloaded and validated.
  */
 export default async function DownloadCli(saveTo: string): Promise<void> {
@@ -285,19 +323,22 @@ export default async function DownloadCli(saveTo: string): Promise<void> {
   const repoName = 'LynxHardwareCLI';
   const cliName = 'LynxHardwareCLI';
 
-  const specificToolDir = path.join(saveTo, cliName);
+  // The base directory where different versions of the CLI will be stored
+  const cliBaseDir = path.join(saveTo, cliName);
 
   try {
-    const extractedPath = await downloadAndExtractLatestCli(repoOwner, repoName, cliName, specificToolDir);
+    const extractedPath = await downloadAndExtractLatestCli(repoOwner, repoName, cliName, cliBaseDir);
     console.log(`CLI tool is ready at: ${extractedPath}`);
 
     const executableName = os.platform() === 'win32' ? `${cliName}.exe` : cliName;
     const executablePath = path.join(extractedPath, executableName);
     console.log(`Executable should be at: ${executablePath}`);
 
+    // Verify the executable exists in the newly extracted or existing directory
     await fsPromises.access(executablePath, originalFs.constants.F_OK);
     console.log(`Executable ${executablePath} exists.`);
   } catch (error) {
-    console.error('An error occurred in the main process:', (error as Error).message);
+    console.error('An error occurred during CLI download and setup:', (error as Error).message);
+    throw error; // Re-throw the error for the caller to handle
   }
 }
