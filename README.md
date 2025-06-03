@@ -28,13 +28,13 @@ Motherboard, Storage, and Network.
 ## Installation
 
 ```bash
-npm i @lynx/hwmonitor
+npm i @lynxhub/hwmonitor
 ````
 
 Or if you use yarn:
 
 ```bash
-yarn add @lynx/hwmonitor
+yarn add @lynxhub/hwmonitor
 ```
 
 ## Usage
@@ -42,7 +42,7 @@ yarn add @lynx/hwmonitor
 First, import the `HardwareMonitor` class:
 
 ```typescript
-import HardwareMonitor, {HardwareReport, MonitorError, ComponentType} from '@lynx/hwmonitor';
+import HardwareMonitor, {HardwareReport, MonitorError, ComponentType} from '@lynxhub/hwmonitor';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 

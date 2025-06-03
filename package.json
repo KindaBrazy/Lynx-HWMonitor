@@ -1,27 +1,26 @@
 {
-  "name": "@lynx/hwmonitor",
+  "name": "@lynxhub/hwmonitor",
   "version": "0.9.0",
   "description": "Lynx Hardware Monitor is a Node.js module that tracks your system's CPU, GPU, memory, motherboard, storage, and network.",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "type": "module",
   "homepage": "https://github.com/KindaBrazy/Lynx-HWMonitor",
   "bugs": {
     "url": "https://github.com/KindaBrazy/Lynx-HWMonitor/issues"
-  },
-  "author": {
-    "name": "KindaBrazy",
-    "url": "https://github.com/KindaBrazy",
-    "email": "kindofbrazy@gmail.com"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/KindaBrazy/Lynx-HWMonitor.git"
   },
   "license": "MIT",
+  "author": "KindaBrazy <kindofbrazy@gmail.com> (https://github.com/KindaBrazy)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node dist/index.js"
+  },
+  "dependencies": {
+    "decompress": "^4.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",
@@ -32,8 +31,5 @@
     "prettier": "^3.5.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.33.1"
-  },
-  "dependencies": {
-    "decompress": "^4.2.1"
   }
 }
