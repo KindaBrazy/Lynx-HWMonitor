@@ -318,7 +318,7 @@ async function downloadAndExtractLatestCli(
  * Versions will be stored in subdirectories like 'LynxHardwareCLI/v1.0.0'.
  * @return {Promise<void>} A promise that resolves when the CLI tool is successfully downloaded and validated.
  */
-export default async function DownloadCli(targetDir: string): Promise<void> {
+export default async function DownloadCli(targetDir: string): Promise<string> {
   const repoOwner = 'KindaBrazy';
   const repoName = 'LynxHardwareCLI';
   const cliName = 'LynxHardwareCLI';
@@ -337,6 +337,7 @@ export default async function DownloadCli(targetDir: string): Promise<void> {
     // Verify the executable exists in the newly extracted or existing directory
     await fsPromises.access(executablePath, originalFs.constants.F_OK);
     console.log(`Executable ${executablePath} exists.`);
+    return executablePath;
   } catch (error) {
     console.error('An error occurred during CLI download and setup:', (error as Error).message);
     throw error; // Re-throw the error for the caller to handle
