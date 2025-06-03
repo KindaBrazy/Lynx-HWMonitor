@@ -314,17 +314,17 @@ async function downloadAndExtractLatestCli(
 /**
  * Downloads and extracts the latest version of the CLI tool to the specified directory.
  *
- * @param {string} saveTo - The base directory where the CLI tool should be saved (e.g., 'C:/Users/YourUser/AppData/Local/LynxHub/cli').
+ * @param {string} targetDir - The base directory where the CLI tool should be saved (e.g., 'C:/Users/YourUser/AppData/Local/LynxHub/cli').
  * Versions will be stored in subdirectories like 'LynxHardwareCLI/v1.0.0'.
  * @return {Promise<void>} A promise that resolves when the CLI tool is successfully downloaded and validated.
  */
-export default async function DownloadCli(saveTo: string): Promise<void> {
+export default async function DownloadCli(targetDir: string): Promise<void> {
   const repoOwner = 'KindaBrazy';
   const repoName = 'LynxHardwareCLI';
   const cliName = 'LynxHardwareCLI';
 
   // The base directory where different versions of the CLI will be stored
-  const cliBaseDir = path.join(saveTo, cliName);
+  const cliBaseDir = path.join(targetDir, cliName);
 
   try {
     const extractedPath = await downloadAndExtractLatestCli(repoOwner, repoName, cliName, cliBaseDir);
