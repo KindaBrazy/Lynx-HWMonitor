@@ -1,5 +1,12 @@
 # Lynx Hardware Monitor
 
+[![NPM Version](https://img.shields.io/npm/v/@lynxhub/hwmonitor?style=flat-square)](https://www.npmjs.com/package/@lynxhub/hwmonitor)
+[![License](https://img.shields.io/npm/l/@lynxhub/hwmonitor?style=flat-square)](https://github.com/KindaBrazy/Lynx-HWMonitor/blob/main/LICENSE)
+[![GitHub Issues](https://img.shields.io/github/issues/KindaBrazy/Lynx-HWMonitor?style=flat-square)](https://github.com/KindaBrazy/Lynx-HWMonitor/issues)
+[![Code Style: Prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://prettier.io)
+[![Linter: ESLint](https://img.shields.io/badge/linter-eslint-4B32C3.svg?style=flat-square)](https://eslint.org)
+[![Built with: TypeScript](https://img.shields.io/badge/built%20with-TypeScript-007ACC.svg?style=flat-square)](https://www.typescriptlang.org/)
+
 Lynx Hardware Monitor is a Node.js module for monitoring system hardware components such as CPU, GPU, Memory,
 Motherboard, Storage, and Network.
 
