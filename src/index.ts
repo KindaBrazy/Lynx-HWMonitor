@@ -165,24 +165,45 @@ export default class HardwareMonitor extends EventEmitter {
           return reject(err);
         }
         try {
-          const report: HardwareReport = JSON.parse(output);
+          const parsedReport: HardwareReport = JSON.parse(output);
+          let finalReport: HardwareReport;
+
+          // Determine if any actual hardware components were requested for the CLI
+          const cliComponentsRequested = components?.filter(comp => comp !== 'uptime');
+
+          if (!cliComponentsRequested || cliComponentsRequested.length === 0) {
+            // If only 'uptime' was requested or no specific hardware components were requested,
+            // create a new report object to ensure only relevant data is included.
+            finalReport = {
+              Timestamp: parsedReport.Timestamp, // Keep the timestamp from the external report
+              CPU: [], // Explicitly empty these arrays
+              GPU: [],
+              Memory: [],
+              Motherboard: [],
+              Storage: [],
+              Network: [],
+            };
+          } else {
+            // If specific hardware components were requested, use the parsed report directly
+            finalReport = parsedReport;
+          }
 
           // Add uptime and elapsed time if requested
           if (components?.includes('uptime')) {
             const osUptimeSeconds = os.uptime();
-            report.Uptime = {
+            finalReport.Uptime = {
               rawSeconds: osUptimeSeconds,
               formatted: this.formatSeconds(osUptimeSeconds),
             };
 
             const elapsedTimeSeconds = (Date.now() - this.creationTimestamp) / 1000;
-            report.ElapsedTime = {
+            finalReport.ElapsedTime = {
               rawSeconds: elapsedTimeSeconds,
               formatted: this.formatSeconds(elapsedTimeSeconds),
             };
           }
 
-          resolve(report);
+          resolve(finalReport);
         } catch (e) {
           const err: MonitorError = new Error('Failed to parse JSON output from hardware monitor.') as MonitorError;
           err.type = 'json_parse_error';
@@ -221,24 +242,45 @@ export default class HardwareMonitor extends EventEmitter {
         if (potentialJsonStart !== -1) {
           const jsonString = this.buffer.substring(potentialJsonStart, potentialJsonEnd + 1);
           try {
-            const report: HardwareReport = JSON.parse(jsonString);
+            const parsedReport: HardwareReport = JSON.parse(jsonString);
+            let finalReport: HardwareReport;
+
+            // Determine if any actual hardware components were requested for the CLI
+            const cliComponentsRequested = components?.filter(comp => comp !== 'uptime');
+
+            if (!cliComponentsRequested || cliComponentsRequested.length === 0) {
+              // If only 'uptime' was requested or no specific hardware components were requested,
+              // create a new report object to ensure only relevant data is included.
+              finalReport = {
+                Timestamp: parsedReport.Timestamp, // Keep the timestamp from the external report
+                CPU: [], // Explicitly empty these arrays
+                GPU: [],
+                Memory: [],
+                Motherboard: [],
+                Storage: [],
+                Network: [],
+              };
+            } else {
+              // If specific hardware components were requested, use the parsed report directly
+              finalReport = parsedReport;
+            }
 
             // Add uptime and elapsed time if requested
             if (components?.includes('uptime')) {
               const osUptimeSeconds = os.uptime();
-              report.Uptime = {
+              finalReport.Uptime = {
                 rawSeconds: osUptimeSeconds,
                 formatted: this.formatSeconds(osUptimeSeconds),
               };
 
               const elapsedTimeSeconds = (Date.now() - this.creationTimestamp) / 1000;
-              report.ElapsedTime = {
+              finalReport.ElapsedTime = {
                 rawSeconds: elapsedTimeSeconds,
                 formatted: this.formatSeconds(elapsedTimeSeconds),
               };
             }
 
-            this.emit('data', report);
+            this.emit('data', finalReport);
             const nextSeparator = this.buffer.indexOf('--- Next update', potentialJsonEnd);
             if (nextSeparator !== -1) {
               const endOfSeparator = this.buffer.indexOf('\n', nextSeparator);
