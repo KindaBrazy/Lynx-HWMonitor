@@ -31,6 +31,8 @@ Motherboard, Storage, and Network.
 * **.NET 8 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 8 runtime to be installed. The module
   will check for this requirement. You can download it
   from [https://dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0).
+* **Administrative Privileges**: Some hardware data may not be accessible unless the application using this module is
+  run with administrative privileges (e.g., "Run as administrator" on Windows, or using `sudo` on Linux/macOS).
 
 ## Installation
 
@@ -67,123 +69,123 @@ const cliStorageDir = join(homeDir, '.your-app-name', 'HardwareMonitorCLI');
 const monitor = new HardwareMonitor();
 
 async function main() {
-  try {
-    // 1. Check requirements and download the CLI tool
-    // This needs a directory path where the CLI can be stored.
-    console.log(`Initializing Hardware Monitor... CLI will be stored in: ${cliStorageDir}`);
-    await monitor.checkRequirements(cliStorageDir);
-    console.log('Requirements checked and CLI is ready.');
+    try {
+        // 1. Check requirements and download the CLI tool
+        // This needs a directory path where the CLI can be stored.
+        console.log(`Initializing Hardware Monitor... CLI will be stored in: ${cliStorageDir}`);
+        await monitor.checkRequirements(cliStorageDir);
+        console.log('Requirements checked and CLI is ready.');
 
-    // 2. Get data once
-    console.log('\nGetting data once for GPU, CPU, and Uptime...');
-    // Monitor only GPU and CPU, with a 5-second timeout. 'uptime' is also requested.
-    const reportOnce = await monitor.getDataOnce(['gpu', 'cpu', 'uptime'], 5000);
-    console.log('Data (once):');
-    console.log(JSON.stringify(reportOnce, null, 2));
+        // 2. Get data once
+        console.log('\nGetting data once for GPU, CPU, and Uptime...');
+        // Monitor only GPU and CPU, with a 5-second timeout. 'uptime' is also requested.
+        const reportOnce = await monitor.getDataOnce(['gpu', 'cpu', 'uptime'], 5000);
+        console.log('Data (once):');
+        console.log(JSON.stringify(reportOnce, null, 2));
 
-    // Example: Accessing specific data
-    if (reportOnce.CPU && reportOnce.CPU.length > 0) {
-      const cpuName = reportOnce.CPU[0].Name;
-      console.log(`\nCPU Name: ${cpuName}`); //
-      const cpuLoadSensor = reportOnce.CPU[0].Sensors.find(s => s.Name === 'CPU Total' && s.Type === 'Load'); //
-      if (cpuLoadSensor && cpuLoadSensor.Value !== null) {
-        console.log(`Current CPU Load: ${cpuLoadSensor.Value.toFixed(2)}%`); //
-      }
-    }
-    if (reportOnce.Uptime) {
-      console.log(`System Uptime: ${reportOnce.Uptime.formatted}`); //
-    }
-    if (reportOnce.ElapsedTime) {
-      console.log(`Monitor Elapsed Time: ${reportOnce.ElapsedTime.formatted}`); //
-    }
-
-    // 3. Start timed monitoring
-    console.log('\nStarting timed monitoring for CPU and Memory (updates every 3 seconds)...');
-
-    monitor.on('data', (data: HardwareReport) => { //
-      console.log('\n--- Timed Data Received ---');
-      console.log(`Timestamp: ${new Date(data.Timestamp).toISOString()}`); //
-
-      if (data.CPU && data.CPU.length > 0 && data.CPU[0].Sensors) { //
-        const cpuLoad = data.CPU[0].Sensors.find(s => s.Name === 'CPU Total' && s.Type === 'Load'); //
-        if (cpuLoad && cpuLoad.Value !== null) {
-          console.log(`Current CPU Load: ${cpuLoad.Value.toFixed(2)}%`); //
+        // Example: Accessing specific data
+        if (reportOnce.CPU && reportOnce.CPU.length > 0) {
+            const cpuName = reportOnce.CPU[0].Name;
+            console.log(`\nCPU Name: ${cpuName}`); //
+            const cpuLoadSensor = reportOnce.CPU[0].Sensors.find(s => s.Name === 'CPU Total' && s.Type === 'Load'); //
+            if (cpuLoadSensor && cpuLoadSensor.Value !== null) {
+                console.log(`Current CPU Load: ${cpuLoadSensor.Value.toFixed(2)}%`); //
+            }
         }
-      }
-      if (data.Memory && data.Memory.length > 0 && data.Memory[0].Sensors) { //
-        const memoryUsedSensor = data.Memory[0].Sensors.find(s => s.Name === 'Memory Used' && s.Type === 'Data'); //
-        const memoryAvailableSensor = data.Memory[0].Sensors.find(s => s.Name === 'Memory Available' && s.Type === 'Data'); //
-        if (memoryUsedSensor && memoryUsedSensor.Value !== null) {
-          console.log(`Memory Used: ${memoryUsedSensor.Value.toFixed(2)} ${memoryUsedSensor.Unit}`); //
+        if (reportOnce.Uptime) {
+            console.log(`System Uptime: ${reportOnce.Uptime.formatted}`); //
         }
-        if (memoryAvailableSensor && memoryAvailableSensor.Value !== null) {
-          console.log(`Memory Available: ${memoryAvailableSensor.Value.toFixed(2)} ${memoryAvailableSensor.Unit}`); //
+        if (reportOnce.ElapsedTime) {
+            console.log(`Monitor Elapsed Time: ${reportOnce.ElapsedTime.formatted}`); //
         }
-      }
-      if (data.Uptime) { //
-        console.log(`System Uptime: ${data.Uptime.formatted}`); //
-      }
-      if (data.ElapsedTime) { //
-        console.log(`Monitor Elapsed Time: ${data.ElapsedTime.formatted}`); //
-      }
-      // console.log(JSON.stringify(data, null, 2)); // Optionally log full data
-      console.log('--- End Timed Data ---');
-    });
 
-    monitor.on('error', (error: MonitorError) => { //
-      console.error('\n--- Timed Monitoring Error ---');
-      console.error(`Error Type: ${error.type}`); //
-      console.error(`Message: ${error.message}`); //
-      if (error.stderrData) console.error('Stderr:', error.stderrData); //
-      if (error.rawError) console.error('Raw Error:', error.rawError); //
-      console.error('--- End Error ---');
-    });
+        // 3. Start timed monitoring
+        console.log('\nStarting timed monitoring for CPU and Memory (updates every 3 seconds)...');
 
-    // Start monitoring CPU, Memory, and Uptime. Updates every 3 seconds.
-    monitor.startTimed(3000, ['cpu', 'memory', 'uptime']); //
+        monitor.on('data', (data: HardwareReport) => { //
+            console.log('\n--- Timed Data Received ---');
+            console.log(`Timestamp: ${new Date(data.Timestamp).toISOString()}`); //
 
-    // Stop timed monitoring after a while (e.g., 15 seconds for this example)
-    setTimeout(() => {
-      console.log('\nStopping timed monitoring...');
-      monitor.stopTimed(); //
-      console.log('Monitoring stopped. Example finished.');
+            if (data.CPU && data.CPU.length > 0 && data.CPU[0].Sensors) { //
+                const cpuLoad = data.CPU[0].Sensors.find(s => s.Name === 'CPU Total' && s.Type === 'Load'); //
+                if (cpuLoad && cpuLoad.Value !== null) {
+                    console.log(`Current CPU Load: ${cpuLoad.Value.toFixed(2)}%`); //
+                }
+            }
+            if (data.Memory && data.Memory.length > 0 && data.Memory[0].Sensors) { //
+                const memoryUsedSensor = data.Memory[0].Sensors.find(s => s.Name === 'Memory Used' && s.Type === 'Data'); //
+                const memoryAvailableSensor = data.Memory[0].Sensors.find(s => s.Name === 'Memory Available' && s.Type === 'Data'); //
+                if (memoryUsedSensor && memoryUsedSensor.Value !== null) {
+                    console.log(`Memory Used: ${memoryUsedSensor.Value.toFixed(2)} ${memoryUsedSensor.Unit}`); //
+                }
+                if (memoryAvailableSensor && memoryAvailableSensor.Value !== null) {
+                    console.log(`Memory Available: ${memoryAvailableSensor.Value.toFixed(2)} ${memoryAvailableSensor.Unit}`); //
+                }
+            }
+            if (data.Uptime) { //
+                console.log(`System Uptime: ${data.Uptime.formatted}`); //
+            }
+            if (data.ElapsedTime) { //
+                console.log(`Monitor Elapsed Time: ${data.ElapsedTime.formatted}`); //
+            }
+            // console.log(JSON.stringify(data, null, 2)); // Optionally log full data
+            console.log('--- End Timed Data ---');
+        });
 
-      // Example of getting data again after stopping
-      // Note: checkRequirements is only needed once unless cliStorageDir changes or CLI needs update.
-      console.log('\nGetting data once for Storage and Uptime after stopping timed monitor...');
-      monitor.getDataOnce(['storage', 'uptime'], 5000) //
-              .then(report => {
-                console.log('Data (storage - after stop):');
-                console.log(JSON.stringify(report, null, 2));
-              })
-              .catch(err => {
-                const monitorError = err as MonitorError;
-                console.error('Error getting storage data after stop:', monitorError.message);
-              });
+        monitor.on('error', (error: MonitorError) => { //
+            console.error('\n--- Timed Monitoring Error ---');
+            console.error(`Error Type: ${error.type}`); //
+            console.error(`Message: ${error.message}`); //
+            if (error.stderrData) console.error('Stderr:', error.stderrData); //
+            if (error.rawError) console.error('Raw Error:', error.rawError); //
+            console.error('--- End Error ---');
+        });
 
-    }, 15000);
+        // Start monitoring CPU, Memory, and Uptime. Updates every 3 seconds.
+        monitor.startTimed(3000, ['cpu', 'memory', 'uptime']); //
 
-  } catch (error) {
-    console.error('\n--- An Error Occurred in Main ---');
-    // Using 'as MonitorError' for type assertion to access specific properties
-    const monitorError = error as MonitorError;
-    console.error(`Error Type: ${monitorError.type || 'N/A'}`);
-    console.error(`Message: ${monitorError.message}`);
-    if (monitorError.stderrData) {
-      console.error('Stderr Data:', monitorError.stderrData);
+        // Stop timed monitoring after a while (e.g., 15 seconds for this example)
+        setTimeout(() => {
+            console.log('\nStopping timed monitoring...');
+            monitor.stopTimed(); //
+            console.log('Monitoring stopped. Example finished.');
+
+            // Example of getting data again after stopping
+            // Note: checkRequirements is only needed once unless cliStorageDir changes or CLI needs update.
+            console.log('\nGetting data once for Storage and Uptime after stopping timed monitor...');
+            monitor.getDataOnce(['storage', 'uptime'], 5000) //
+                .then(report => {
+                    console.log('Data (storage - after stop):');
+                    console.log(JSON.stringify(report, null, 2));
+                })
+                .catch(err => {
+                    const monitorError = err as MonitorError;
+                    console.error('Error getting storage data after stop:', monitorError.message);
+                });
+
+        }, 15000);
+
+    } catch (error) {
+        console.error('\n--- An Error Occurred in Main ---');
+        // Using 'as MonitorError' for type assertion to access specific properties
+        const monitorError = error as MonitorError;
+        console.error(`Error Type: ${monitorError.type || 'N/A'}`);
+        console.error(`Message: ${monitorError.message}`);
+        if (monitorError.stderrData) {
+            console.error('Stderr Data:', monitorError.stderrData);
+        }
+        if (monitorError.rawError) {
+            console.error('Raw Error:', monitorError.rawError);
+        }
+        // Check for the specific .NET runtime error message
+        if (monitorError.message && monitorError.message.includes('.NET 8 runtime')) { //
+            console.error(
+                "Please ensure .NET 8 runtime is installed. " +
+                "Download from: [https://dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0)" //
+            );
+        }
+        console.error('--- End Error in Main ---');
     }
-    if (monitorError.rawError) {
-      console.error('Raw Error:', monitorError.rawError);
-    }
-    // Check for the specific .NET runtime error message
-    if (monitorError.message && monitorError.message.includes('.NET 8 runtime')) { //
-      console.error(
-              "Please ensure .NET 8 runtime is installed. " +
-              "Download from: [https://dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0)" //
-      );
-    }
-    console.error('--- End Error in Main ---');
-  }
 }
 
 main();
