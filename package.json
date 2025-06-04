@@ -1,6 +1,6 @@
 {
   "name": "@lynxhub/hwmonitor",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Lynx Hardware Monitor is a Node.js module that tracks your system's CPU, GPU, memory, motherboard, storage, and network.",
   "homepage": "https://github.com/KindaBrazy/Lynx-HWMonitor",
   "bugs": {
