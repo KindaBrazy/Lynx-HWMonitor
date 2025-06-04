@@ -3,3 +3,4 @@ package-lock.json
 
 dist
 .idea
+/src/example.ts
