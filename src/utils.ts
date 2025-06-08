@@ -9,25 +9,33 @@ function isDotNet8RuntimeInstalled(output: string): boolean {
   return output.toLowerCase().includes(DOTNET_8_RUNTIME_IDENTIFIER);
 }
 
+// Define a simple logger type that matches console's interface for warn and error
+type Logger = {
+  warn: (...args: any[]) => void;
+  error: (...args: any[]) => void;
+};
+
 /**
  * Checks if .NET Runtime 8 is installed on the system.
  * This function executes a command to list installed .NET runtimes and verifies
  * if .NET Runtime 8 is included in the list.
  *
+ * @param {Logger} [logger=console] - Optional logger for outputting warnings or errors.
  * @return {Promise<boolean>} A promise that resolves to `true`
  * if .NET Runtime 8 is installed otherwise resolves to `false`.
  */
-export async function checkDotNetRuntime8(): Promise<boolean> {
+export async function checkDotNetRuntime8(logger: Logger = console): Promise<boolean> {
   try {
     const {stdout, stderr} = await execAsync(DOTNET_LIST_RUNTIMES_COMMAND);
 
     if (stderr) {
-      console.warn(`Stderr: ${stderr}`);
+      logger.warn(`Stderr from 'dotnet --list-runtimes': ${stderr}`);
     }
 
     return isDotNet8RuntimeInstalled(stdout);
   } catch (error) {
-    console.error(`Error executing command: ${(error as Error).message}`);
+    // This error usually means the 'dotnet' command is not found.
+    logger.error(`Error executing 'dotnet --list-runtimes': ${(error as Error).message}`);
     return false;
   }
 }

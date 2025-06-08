@@ -4,6 +4,8 @@ import os from 'node:os';
 import {checkDotNetRuntime8} from './utils.js';
 import DownloadCli from './cli_downloader.js';
 
+export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
+
 export type SensorInfo = {
   Name: string;
   Value: number | null;
@@ -50,10 +52,28 @@ export default class HardwareMonitor extends EventEmitter {
   private buffer: string = '';
   private initialMessageSkipped: boolean = false;
   private readonly creationTimestamp: number;
+  private readonly logLevel: LogLevel;
 
-  constructor() {
+  constructor(logLevel: LogLevel = 'info') {
     super();
     this.creationTimestamp = Date.now();
+    this.logLevel = logLevel;
+  }
+
+  private log(level: LogLevel, ...args: any[]): void {
+    const levels: LogLevel[] = ['silent', 'error', 'warn', 'info', 'debug'];
+    const currentLevelIndex = levels.indexOf(this.logLevel);
+    const messageLevelIndex = levels.indexOf(level);
+
+    if (currentLevelIndex >= messageLevelIndex && level !== 'silent') {
+      if (level === 'error') {
+        console.error(...args);
+      } else if (level === 'warn') {
+        console.warn(...args);
+      } else {
+        console.log(...args);
+      }
+    }
   }
 
   /**
@@ -104,13 +124,19 @@ export default class HardwareMonitor extends EventEmitter {
    * @throws Error if .NET 8 is not found or download fails.
    */
   public async checkRequirements(targetDir: string): Promise<void> {
-    const isDotNetInstalled = await checkDotNetRuntime8();
+    const logger = {
+      warn: (...args: any[]) => this.log('warn', ...args),
+      error: (...args: any[]) => this.log('error', ...args),
+    };
+
+    const isDotNetInstalled = await checkDotNetRuntime8(logger);
     if (!isDotNetInstalled) {
       throw new Error(
         '.NET 8 runtime not found. Please install it from https://dotnet.microsoft.com/download/dotnet/8.0',
       );
     }
-    this.executablePath = await DownloadCli(targetDir);
+    this.executablePath = await DownloadCli(targetDir, this.logLevel);
+    this.log('info', '✅ Lynx Hardware Monitor is ready to use.');
   }
 
   private addUptimeDataIfNeeded(report: HardwareReport, requestedComponents?: ComponentType[]): void {
@@ -200,11 +226,8 @@ export default class HardwareMonitor extends EventEmitter {
           const cliComponentsRequested = components?.filter(comp => comp !== 'uptime');
 
           if (!cliComponentsRequested || cliComponentsRequested.length === 0) {
-            // If only 'uptime' was requested or no specific CLI components, create a base report.
-            // The CLI might still return all hardware data if --components is not passed or empty.
-            // We ensure the final report only contains what's semantically requested.
             finalReport = {
-              Timestamp: parsedReport.Timestamp || new Date().toISOString(), // Use CLI timestamp or current
+              Timestamp: parsedReport.Timestamp || new Date().toISOString(),
               CPU: parsedReport.CPU || [],
               GPU: parsedReport.GPU || [],
               Memory: parsedReport.Memory || [],
@@ -213,7 +236,6 @@ export default class HardwareMonitor extends EventEmitter {
               Network: parsedReport.Network || [],
             };
           } else {
-            // If specific hardware components were requested for the CLI, use the parsed report.
             finalReport = parsedReport;
           }
 
@@ -244,7 +266,7 @@ export default class HardwareMonitor extends EventEmitter {
     }
     if (!this.executablePath) {
       const err: MonitorError = new Error('Executable path not set. Call checkRequirements() first.') as MonitorError;
-      err.type = 'spawn_error'; // Or a new specific type like 'configuration_error'
+      err.type = 'spawn_error';
       this.emit('error', err);
       return;
     }
@@ -263,31 +285,26 @@ export default class HardwareMonitor extends EventEmitter {
         if (newlineIndex !== -1) {
           const firstLine = this.buffer.substring(0, newlineIndex);
           if (!firstLine.startsWith('{')) {
-            // Check if the first line is not JSON
             this.buffer = this.buffer.substring(newlineIndex + 2);
           }
           this.initialMessageSkipped = true;
         } else if (this.buffer.length > 1024 && !this.buffer.includes('{')) {
-          // Safety for very long non-JSON preamble, assume no initial message or error
           this.initialMessageSkipped = true;
         } else {
-          return; // Wait for more data to determine if there's an initial message
+          return;
         }
       }
 
-      if (!this.initialMessageSkipped) return; // Still waiting
+      if (!this.initialMessageSkipped) return;
 
-      // Process complete JSON objects from the buffer
       while (this.buffer.length > 0) {
         if (!this.buffer.startsWith('{')) {
           const nextJsonStartIndex = this.buffer.indexOf('{');
           if (nextJsonStartIndex !== -1) {
-            // Discard unexpected preamble
             this.buffer = this.buffer.substring(nextJsonStartIndex);
           } else {
-            // No '{' found, buffer might contain partial non-JSON data.
-            if (this.buffer.trim() === '') this.buffer = ''; // Clear if only whitespace
-            break; // Wait for more data that starts a JSON object
+            if (this.buffer.trim() === '') this.buffer = '';
+            break;
           }
         }
         if (!this.buffer.startsWith('{')) break;
@@ -317,9 +334,8 @@ export default class HardwareMonitor extends EventEmitter {
                 jsonEndIndex = i;
                 break;
               } else if (balance < 0) {
-                // Unbalanced braces, likely an error in stream
-                this.buffer = ''; // Clear buffer to try and recover
-                this.initialMessageSkipped = false; // Re-check for initial message
+                this.buffer = '';
+                this.initialMessageSkipped = false;
                 const err: MonitorError = new Error(
                   'JSON braces unbalanced (too many closing). Resetting buffer.',
                 ) as MonitorError;
@@ -335,7 +351,6 @@ export default class HardwareMonitor extends EventEmitter {
           const reportString = this.buffer.substring(0, jsonEndIndex + 1);
           let consumedLength = jsonEndIndex + 1;
 
-          // Consume trailing \r\n or \n
           if (
             this.buffer.length > consumedLength &&
             this.buffer[consumedLength] === '\r' &&
@@ -350,7 +365,6 @@ export default class HardwareMonitor extends EventEmitter {
           try {
             const parsedData: any = JSON.parse(reportString);
 
-            // Basic validation for a HardwareReport structure
             if (typeof parsedData.Timestamp === 'string') {
               let finalReport: HardwareReport;
               const cliComponentsRequested = components?.filter(comp => comp !== 'uptime');
@@ -388,11 +402,11 @@ export default class HardwareMonitor extends EventEmitter {
             err.rawError = e;
             err.stderrData = reportString;
             this.emit('error', err);
-            this.buffer = this.buffer.substring(consumedLength); // Discard problematic segment
+            this.buffer = this.buffer.substring(consumedLength);
             break;
           }
         } else {
-          break; // Incomplete JSON object, wait for more data
+          break;
         }
       }
     });
@@ -400,7 +414,6 @@ export default class HardwareMonitor extends EventEmitter {
     this.activeProcess.stderr?.on('data', data => {
       const errorMessage = data.toString().trim();
       if (errorMessage) {
-        // Only emit error if there's actual error content
         const err: MonitorError = new Error(`Error from hardware monitor process: ${errorMessage}`) as MonitorError;
         err.type = 'process_error';
         err.stderrData = errorMessage;
@@ -419,7 +432,6 @@ export default class HardwareMonitor extends EventEmitter {
     });
 
     this.activeProcess.on('close', code => {
-      // Only emit error if process was not intentionally killed and exited with non-zero code
       if (this.activeProcess && !this.activeProcess.killed && code !== 0) {
         const message = `Hardware monitor executable (timed) exited unexpectedly with code ${code}.`;
         const err: MonitorError = new Error(message) as MonitorError;
@@ -428,7 +440,7 @@ export default class HardwareMonitor extends EventEmitter {
       }
       this.activeProcess = null;
       this.buffer = '';
-      this.initialMessageSkipped = false; // Reset for next start
+      this.initialMessageSkipped = false;
     });
   }
 
@@ -438,10 +450,9 @@ export default class HardwareMonitor extends EventEmitter {
   public stopTimed(): void {
     if (this.activeProcess) {
       this.activeProcess.kill();
-      // activeProcess will be set to null in the 'close' event handler
-      console.log('HardwareMonitor: Timed monitoring stop signal sent.');
+      this.log('debug', 'HardwareMonitor: Timed monitoring stop signal sent.');
     } else {
-      // console.log('HardwareMonitor: No active timed monitoring process to stop.'); // Optional: for verbosity
+      this.log('debug', 'HardwareMonitor: No active timed monitoring process to stop.');
     }
   }
 }
