@@ -156,14 +156,14 @@ async function cleanupOldVersions(baseDir: string, currentVersion: string, cliNa
 
 /**
  * Downloads and extracts a CLI tool from the latest GitHub release.
+ * If the GitHub API is rate-limited, it will attempt to use the latest locally available version.
  *
  * @param repoOwner The owner of the GitHub repository.
  * @param repoName The name of the GitHub repository.
  * @param cliName The base name of the CLI tool.
- * @param baseDestinationDir The base directory where the CLI tool's versions will be extracted.
- * This directory will be created if it doesn't exist.
- * @returns A promise that resolves to the path of the directory where files were extracted.
- * @throws Will throw an error if any step fails (e.g., network issue, asset not found, extraction error).
+ * @param baseDestinationDir The base directory where the CLI tool's versions will be stored.
+ * @returns A promise that resolves to the path of the CLI tool's directory.
+ * @throws Will throw an error if fetching fails and no local fallback is available.
  */
 async function downloadAndExtractLatestCli(
   repoOwner: string,
@@ -177,34 +177,16 @@ async function downloadAndExtractLatestCli(
   const platform = os.platform();
   const arch = os.arch();
 
-  let osIdentifier: string;
-  switch (platform) {
-    case 'win32':
-      osIdentifier = 'win';
-      break;
-    case 'darwin':
-      osIdentifier = 'osx';
-      break;
-    case 'linux':
-      osIdentifier = 'linux';
-      break;
-    default:
-      console.error(`Unsupported platform: ${platform}`);
-      throw new Error(`Unsupported platform: ${platform}`);
+  const osIdentifier = platform === 'win32' ? 'win' : platform === 'darwin' ? 'osx' : 'linux';
+  if (!['win', 'osx', 'linux'].includes(osIdentifier)) {
+    throw new Error(`Unsupported platform: ${platform}`);
   }
 
-  let archIdentifier: string;
-  switch (arch) {
-    case 'x64':
-      archIdentifier = 'x64';
-      break;
-    case 'arm64':
-      archIdentifier = 'arm64';
-      break;
-    default:
-      console.error(`Unsupported architecture: ${arch}`);
-      throw new Error(`Unsupported architecture: ${arch}`);
+  const archIdentifier = arch === 'x64' ? 'x64' : 'arm64';
+  if (!['x64', 'arm64'].includes(archIdentifier)) {
+    throw new Error(`Unsupported architecture: ${arch}`);
   }
+
   console.log(`Detected system: ${osIdentifier}-${archIdentifier}`);
 
   // 2. Fetch latest release data from GitHub API
@@ -215,99 +197,94 @@ async function downloadAndExtractLatestCli(
     releaseData = await fetchJson<GitHubRelease>(releaseUrl);
     console.log(`Successfully fetched release: ${releaseData.tag_name}`);
   } catch (error) {
-    console.error(`Error fetching latest release from ${releaseUrl}:`, (error as Error).message);
+    const errorMessage = (error as Error).message;
+    console.error(`Error fetching latest release from ${releaseUrl}:`, errorMessage);
+
+    // If fetching fails due to a rate limit, try to fall back to a local version.
+    if (errorMessage.toLowerCase().includes('403')) {
+      console.warn('GitHub API rate limit exceeded. Checking for existing local versions as a fallback.');
+      try {
+        const dirents = await fsPromises.readdir(baseDestinationDir, {withFileTypes: true});
+        // Filter for directories, map to their names (versions), and sort them.
+        // Using localeCompare with numeric: true ensures correct sorting for version strings like 'v1.10.0' vs 'v1.2.0'.
+        const versionDirs = dirents
+          .filter(dirent => dirent.isDirectory())
+          .map(dirent => dirent.name)
+          .sort((a, b) => b.localeCompare(a, undefined, {numeric: true, sensitivity: 'base'}));
+
+        if (versionDirs.length > 0) {
+          const latestLocalVersion = versionDirs[0];
+          const fallbackPath = path.join(baseDestinationDir, latestLocalVersion);
+          console.log(`Found existing local version. Using latest available '${latestLocalVersion}' as a fallback.`);
+          return fallbackPath;
+        }
+
+        console.error(`API rate limit exceeded and no local versions of ${cliName} found in ${baseDestinationDir}.`);
+        throw new Error(`API rate limit exceeded and no local versions of ${cliName} are available.`);
+      } catch (fsError: any) {
+        if (fsError.code === 'ENOENT') {
+          console.error(`API rate limit exceeded and the destination directory ${baseDestinationDir} does not exist.`);
+        } else {
+          console.error('An unexpected error occurred while finding a local fallback:', fsError.message);
+        }
+        throw new Error(`API rate limit exceeded and no local versions of ${cliName} are available.`);
+      }
+    }
+
+    // For other non-rate-limit errors, fail as before.
     throw new Error(`Failed to fetch latest release info for ${repoOwner}/${repoName}.`);
   }
 
-  if (!releaseData || !releaseData.assets || releaseData.assets.length === 0) {
-    console.error('No assets found in the latest release.');
+  if (!releaseData?.assets?.length) {
     throw new Error(`No assets found in the latest release for ${repoOwner}/${repoName}.`);
   }
 
   const versionString = releaseData.tag_name;
-
   const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
 
   // Check if the latest version already exists
   try {
-    const stats = await fsPromises.stat(finalExtractionPath);
-    if (stats.isDirectory()) {
-      console.log(
-        `Latest CLI tool '${cliName}' version '${versionString}' already extracted in '${finalExtractionPath}'. Skipping download.`,
-      );
-      // Clean up old versions even if the latest is already present
-      await cleanupOldVersions(baseDestinationDir, versionString, cliName);
-      return finalExtractionPath;
-    }
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      console.log(
-        `Latest CLI tool '${cliName}' version '${versionString}' not found in '${finalExtractionPath}'. Proceeding with download.`,
-      );
-      // Directory doesn't exist, proceed with download
-    } else {
-      console.error(`Error checking existence of ${finalExtractionPath}:`, error.message);
-      throw error; // Re-throw other errors
-    }
+    await fsPromises.access(finalExtractionPath);
+    console.log(`Latest version '${versionString}' already exists. Skipping download.`);
+    await cleanupOldVersions(baseDestinationDir, versionString, cliName);
+    return finalExtractionPath;
+  } catch {
+    // Directory doesn't exist, proceed with download.
+    console.log(`New version '${versionString}' not found locally. Proceeding with download.`);
   }
 
-  // If we reach here, the latest version needs to be downloaded/extracted
-  console.log(`New version '${versionString}' available or not found. Proceeding with download.`);
-
-  // 3. Construct the target asset name and find the asset
+  // 3. Find the target asset
   const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
-  console.log(`Looking for asset: ${expectedAssetName}`);
-
   const targetAsset = releaseData.assets.find(asset => asset.name.toLowerCase() === expectedAssetName.toLowerCase());
 
   if (!targetAsset) {
-    console.error(
-      `Could not find asset "${expectedAssetName}". Available assets:`,
-      releaseData.assets.map(a => a.name),
-    );
     throw new Error(`Could not find asset "${expectedAssetName}" in release ${versionString}.`);
   }
+
   console.log(`Found asset: ${targetAsset.name}`);
 
-  // 4. Download the asset
-  const downloadUrl = targetAsset.browser_download_url;
+  // 4. Download and extract
   const tempDownloadDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), `${cliName}-download-`));
   const zipFilePath = path.join(tempDownloadDir, targetAsset.name);
 
   try {
-    console.log(`Downloading ${targetAsset.name} from ${downloadUrl} to ${zipFilePath}...`);
-    await downloadFile(downloadUrl, zipFilePath);
-    console.log(`Download complete: ${zipFilePath}`);
-  } catch (error) {
-    console.error(`Error downloading asset "${targetAsset.name}":`, (error as Error).message);
-    await fsPromises
-      .rm(tempDownloadDir, {recursive: true, force: true})
-      .catch(e => console.error('Error cleaning temp dir:', e));
-    throw new Error(`Failed to download ${targetAsset.name}.`);
-  }
+    console.log(`Downloading ${targetAsset.name} to ${zipFilePath}...`);
+    await downloadFile(targetAsset.browser_download_url, zipFilePath);
 
-  // 5. Extract the ZIP file
-  console.log(`Ensuring extraction directory exists: ${finalExtractionPath}`);
-  await fsPromises.mkdir(finalExtractionPath, {recursive: true});
-
-  try {
     console.log(`Extracting ${zipFilePath} to ${finalExtractionPath}...`);
+    await fsPromises.mkdir(finalExtractionPath, {recursive: true});
     await decompress(zipFilePath, finalExtractionPath);
     console.log('Extraction complete.');
 
-    // After successful extraction, clean up old versions
     await cleanupOldVersions(baseDestinationDir, versionString, cliName);
   } catch (error) {
-    console.error(`Error extracting ZIP file "${zipFilePath}" to "${finalExtractionPath}":`, (error as Error).message);
-    throw new Error(`Failed to extract ${targetAsset.name} to ${finalExtractionPath}.`);
+    console.error('An error occurred during download or extraction:', (error as Error).message);
+    throw new Error(`Failed to download and extract ${targetAsset.name}.`);
   } finally {
-    console.log(`Cleaning up temporary download directory: ${tempDownloadDir}`);
-    await fsPromises
-      .rm(tempDownloadDir, {recursive: true, force: true})
-      .catch(e => console.error('Error cleaning temp dir:', e));
+    await fsPromises.rm(tempDownloadDir, {recursive: true, force: true});
   }
 
-  console.log(`${cliName} has been successfully downloaded and extracted to ${finalExtractionPath}`);
+  console.log(`${cliName} successfully installed at ${finalExtractionPath}`);
   return finalExtractionPath;
 }
 
