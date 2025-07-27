@@ -201,94 +201,91 @@ async function downloadAndExtractLatestCli(
     throw new Error(`Unsupported architecture: ${arch}`);
   }
 
-  const releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
-  let releaseData: GitHubRelease;
-  try {
-    log('debug', `Fetching latest release info from: ${releaseUrl}`);
-    releaseData = await fetchJson<GitHubRelease>(releaseUrl);
-    log('debug', `Successfully fetched release: ${releaseData.tag_name}`);
-  } catch (error) {
-    const errorMessage = (error as Error).message;
-    log('error', `Error fetching latest release from ${releaseUrl}:`, errorMessage);
+  const fallbackToLocalVersion = async (): Promise<string> => {
+    try {
+      const dirents = await fsPromises.readdir(baseDestinationDir, {withFileTypes: true});
+      const versionDirs = dirents
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name)
+        .sort((a, b) => b.localeCompare(a, undefined, {numeric: true, sensitivity: 'base'}));
 
-    if (errorMessage.toLowerCase().includes('403')) {
-      log('warn', 'GitHub API rate limit may be exceeded. Checking for existing local versions as a fallback.');
-      try {
-        const dirents = await fsPromises.readdir(baseDestinationDir, {withFileTypes: true});
-        const versionDirs = dirents
-          .filter(dirent => dirent.isDirectory())
-          .map(dirent => dirent.name)
-          .sort((a, b) => b.localeCompare(a, undefined, {numeric: true, sensitivity: 'base'}));
-
-        if (versionDirs.length > 0) {
-          const latestLocalVersion = versionDirs[0];
-          const fallbackPath = path.join(baseDestinationDir, latestLocalVersion);
-          log('info', `Found existing local version. Using latest available '${latestLocalVersion}' as a fallback.`);
-          return fallbackPath;
-        }
-
-        log('error', `API rate limit exceeded and no local versions of ${cliName} found in ${baseDestinationDir}.`);
-        throw new Error(`API rate limit exceeded and no local versions of ${cliName} are available.`);
-      } catch (fsError: any) {
-        if (fsError.code === 'ENOENT') {
-          log('error', `API rate limit exceeded and the destination directory ${baseDestinationDir} does not exist.`);
-        } else {
-          log('error', 'An unexpected error occurred while finding a local fallback:', fsError.message);
-        }
-        throw new Error(`API rate limit exceeded and no local versions of ${cliName} are available.`);
+      if (versionDirs.length > 0) {
+        const latestLocalVersion = versionDirs[0];
+        const fallbackPath = path.join(baseDestinationDir, latestLocalVersion);
+        log('info', `Found existing local version. Using latest available '${latestLocalVersion}' as a fallback.`);
+        return fallbackPath;
       }
+
+      log('error', `No local versions of ${cliName} found in ${baseDestinationDir}.`);
+      throw new Error(`No local versions of ${cliName} are available.`);
+    } catch (fsError: any) {
+      if (fsError.code === 'ENOENT') {
+        log('error', `Destination directory ${baseDestinationDir} does not exist.`);
+      } else {
+        log('error', 'An unexpected error occurred while finding a local fallback:', fsError.message);
+      }
+      throw new Error(`No local versions of ${cliName} are available.`);
+    }
+  };
+
+  try {
+    const releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
+    log('debug', `Fetching latest release info from: ${releaseUrl}`);
+    const releaseData = await fetchJson<GitHubRelease>(releaseUrl);
+    log('debug', `Successfully fetched release: ${releaseData.tag_name}`);
+
+    if (!releaseData?.assets?.length) {
+      throw new Error(`No assets found in the latest release for ${repoOwner}/${repoName}.`);
     }
 
-    throw new Error(`Failed to fetch latest release info for ${repoOwner}/${repoName}.`);
-  }
+    const versionString = releaseData.tag_name;
+    const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
 
-  if (!releaseData?.assets?.length) {
-    throw new Error(`No assets found in the latest release for ${repoOwner}/${repoName}.`);
-  }
+    try {
+      await fsPromises.access(finalExtractionPath);
+      log('info', `Latest version '${versionString}' already exists. Skipping download.`);
+      await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
+      return finalExtractionPath;
+    } catch {
+      log('info', `New version '${versionString}' not found locally. Proceeding with download.`);
+    }
 
-  const versionString = releaseData.tag_name;
-  const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
+    const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
+    const targetAsset = releaseData.assets.find(asset => asset.name.toLowerCase() === expectedAssetName.toLowerCase());
 
-  try {
-    await fsPromises.access(finalExtractionPath);
-    log('info', `Latest version '${versionString}' already exists. Skipping download.`);
-    await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
+    if (!targetAsset) {
+      throw new Error(`Could not find asset "${expectedAssetName}" in release ${versionString}.`);
+    }
+
+    log('debug', `Found asset: ${targetAsset.name}`);
+
+    const tempDownloadDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), `${cliName}-download-`));
+    const zipFilePath = path.join(tempDownloadDir, targetAsset.name);
+
+    try {
+      log('debug', `Downloading ${targetAsset.name} to ${zipFilePath}...`);
+      await downloadFile(targetAsset.browser_download_url, zipFilePath, log);
+
+      log('debug', `Extracting ${zipFilePath} to ${finalExtractionPath}...`);
+      await fsPromises.mkdir(finalExtractionPath, {recursive: true});
+      await decompress(zipFilePath, finalExtractionPath);
+      log('debug', 'Extraction complete.');
+
+      await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
+    } finally {
+      await fsPromises.rm(tempDownloadDir, {recursive: true, force: true});
+    }
+
+    log('info', `${cliName} is ready at ${finalExtractionPath}`);
     return finalExtractionPath;
-  } catch {
-    log('info', `New version '${versionString}' not found locally. Proceeding with download.`);
-  }
-
-  const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
-  const targetAsset = releaseData.assets.find(asset => asset.name.toLowerCase() === expectedAssetName.toLowerCase());
-
-  if (!targetAsset) {
-    throw new Error(`Could not find asset "${expectedAssetName}" in release ${versionString}.`);
-  }
-
-  log('debug', `Found asset: ${targetAsset.name}`);
-
-  const tempDownloadDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), `${cliName}-download-`));
-  const zipFilePath = path.join(tempDownloadDir, targetAsset.name);
-
-  try {
-    log('debug', `Downloading ${targetAsset.name} to ${zipFilePath}...`);
-    await downloadFile(targetAsset.browser_download_url, zipFilePath, log);
-
-    log('debug', `Extracting ${zipFilePath} to ${finalExtractionPath}...`);
-    await fsPromises.mkdir(finalExtractionPath, {recursive: true});
-    await decompress(zipFilePath, finalExtractionPath);
-    log('debug', 'Extraction complete.');
-
-    await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
   } catch (error) {
-    log('error', 'An error occurred during download or extraction:', (error as Error).message);
-    throw new Error(`Failed to download and extract ${targetAsset.name}.`);
-  } finally {
-    await fsPromises.rm(tempDownloadDir, {recursive: true, force: true});
+    log(
+      'warn',
+      'An error occurred during setup. Attempting to use a local version as fallback.',
+      (error as Error).message,
+    );
+    return await fallbackToLocalVersion();
   }
-
-  log('info', `${cliName} is ready at ${finalExtractionPath}`);
-  return finalExtractionPath;
 }
 
 /**
