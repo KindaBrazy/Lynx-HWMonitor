@@ -1,4 +1,4 @@
-import {spawn, ChildProcess} from 'node:child_process';
+import {ChildProcess, spawn} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import os from 'node:os';
 import {checkDotNetRuntime9} from './utils.js';
@@ -34,6 +34,9 @@ export type HardwareReport = {
   Motherboard: HardwareItemInfo[];
   Storage: HardwareItemInfo[];
   Network: HardwareItemInfo[];
+  Battery: HardwareItemInfo[];
+  Controller: HardwareItemInfo[];
+  Psu: HardwareItemInfo[];
   Uptime?: UptimeInfo;
   ElapsedTime?: UptimeInfo;
 };
@@ -44,7 +47,19 @@ export type MonitorError = Error & {
   stderrData?: string;
 };
 
-export type ComponentType = 'cpu' | 'gpu' | 'memory' | 'motherboard' | 'storage' | 'network' | 'uptime' | string;
+export type ComponentType =
+  | 'cpu'
+  | 'gpu'
+  | 'memory'
+  | 'motherboard'
+  | 'storage'
+  | 'network'
+  | 'all'
+  | 'battery'
+  | 'controller'
+  | 'psu'
+  | 'uptime'
+  | string;
 
 export default class HardwareMonitor extends EventEmitter {
   private executablePath: string = '';
@@ -234,6 +249,9 @@ export default class HardwareMonitor extends EventEmitter {
               Motherboard: parsedReport.Motherboard || [],
               Storage: parsedReport.Storage || [],
               Network: parsedReport.Network || [],
+              Battery: parsedReport.Battery || [],
+              Controller: parsedReport.Controller || [],
+              Psu: parsedReport.Psu || [],
             };
           } else {
             finalReport = parsedReport;
@@ -378,6 +396,9 @@ export default class HardwareMonitor extends EventEmitter {
                   Motherboard: parsedData.Motherboard || [],
                   Storage: parsedData.Storage || [],
                   Network: parsedData.Network || [],
+                  Battery: parsedData.Battery || [],
+                  Controller: parsedData.Controller || [],
+                  Psu: parsedData.Psu || [],
                 };
               } else {
                 finalReport = parsedData as HardwareReport;
