@@ -17,6 +17,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "publishPackage": "npm run build && npm publish --access public",
     "start": "npm run build && node dist/index.js"
   },
   "dependencies": {
