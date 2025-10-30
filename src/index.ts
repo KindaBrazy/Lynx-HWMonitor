@@ -1,7 +1,7 @@
 import {spawn, ChildProcess} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import os from 'node:os';
-import {checkDotNetRuntime8} from './utils.js';
+import {checkDotNetRuntime9} from './utils.js';
 import DownloadCli from './cli_downloader.js';
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
@@ -119,9 +119,9 @@ export default class HardwareMonitor extends EventEmitter {
   }
 
   /**
-   * Checks for .NET 8 runtime and downloads the CLI tool.
+   * Checks for .NET 9 runtime and downloads the CLI tool.
    * @param targetDir - Directory to download the CLI tool.
-   * @throws Error if .NET 8 is not found or download fails.
+   * @throws Error if .NET 9 is not found or download fails.
    */
   public async checkRequirements(targetDir: string): Promise<void> {
     const logger = {
@@ -129,10 +129,10 @@ export default class HardwareMonitor extends EventEmitter {
       error: (...args: any[]) => this.log('error', ...args),
     };
 
-    const isDotNetInstalled = await checkDotNetRuntime8(logger);
+    const isDotNetInstalled = await checkDotNetRuntime9(logger);
     if (!isDotNetInstalled) {
       throw new Error(
-        '.NET 8 runtime not found. Please install it from https://dotnet.microsoft.com/download/dotnet/8.0',
+        '.NET 9 runtime not found. Please install it from https://dotnet.microsoft.com/download/dotnet/9.0',
       );
     }
     this.executablePath = await DownloadCli(targetDir, this.logLevel);

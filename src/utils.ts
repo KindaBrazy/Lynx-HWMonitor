@@ -3,10 +3,10 @@ import {promisify} from 'node:util';
 
 const execAsync = promisify(exec);
 const DOTNET_LIST_RUNTIMES_COMMAND = 'dotnet --list-runtimes';
-const DOTNET_8_RUNTIME_IDENTIFIER = 'microsoft.netcore.app 8.0';
+const DOTNET_9_RUNTIME_IDENTIFIER = 'microsoft.netcore.app 9.0';
 
-function isDotNet8RuntimeInstalled(output: string): boolean {
-  return output.toLowerCase().includes(DOTNET_8_RUNTIME_IDENTIFIER);
+function isDotNet9RuntimeInstalled(output: string): boolean {
+  return output.toLowerCase().includes(DOTNET_9_RUNTIME_IDENTIFIER);
 }
 
 // Define a simple logger type that matches console's interface for warn and error
@@ -16,15 +16,15 @@ type Logger = {
 };
 
 /**
- * Checks if .NET Runtime 8 is installed on the system.
+ * Checks if .NET Runtime 9 is installed on the system.
  * This function executes a command to list installed .NET runtimes and verifies
- * if .NET Runtime 8 is included in the list.
+ * if .NET Runtime 9 is included in the list.
  *
  * @param {Logger} [logger=console] - Optional logger for outputting warnings or errors.
  * @return {Promise<boolean>} A promise that resolves to `true`
- * if .NET Runtime 8 is installed otherwise resolves to `false`.
+ * if .NET Runtime 9 is installed otherwise resolves to `false`.
  */
-export async function checkDotNetRuntime8(logger: Logger = console): Promise<boolean> {
+export async function checkDotNetRuntime9(logger: Logger = console): Promise<boolean> {
   try {
     const {stdout, stderr} = await execAsync(DOTNET_LIST_RUNTIMES_COMMAND);
 
@@ -32,7 +32,7 @@ export async function checkDotNetRuntime8(logger: Logger = console): Promise<boo
       logger.warn(`Stderr from 'dotnet --list-runtimes': ${stderr}`);
     }
 
-    return isDotNet8RuntimeInstalled(stdout);
+    return isDotNet9RuntimeInstalled(stdout);
   } catch (error) {
     // This error usually means the 'dotnet' command is not found.
     logger.error(`Error executing 'dotnet --list-runtimes': ${(error as Error).message}`);
