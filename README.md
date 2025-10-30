@@ -8,7 +8,7 @@
 [![Built with: TypeScript](https://img.shields.io/badge/built%20with-TypeScript-007ACC.svg?style=flat-square)](https://www.typescriptlang.org/)
 
 Lynx Hardware Monitor is a Node.js module for monitoring system hardware components such as CPU, GPU, Memory,
-Motherboard, Storage, and Network.
+Motherboard, Storage, Network, Battery, Controller and PSU.
 
 ## Features
 
@@ -23,14 +23,14 @@ Motherboard, Storage, and Network.
 * **Cross-Platform Support**: Detects OS (Windows, macOS, Linux) and architecture (x64, arm64) to download the
   appropriate CLI tool.
 * **Automatic CLI Management**: Downloads and manages the required `LynxHardwareCLI` from GitHub releases.
-* **.NET Runtime Check**: Verifies if the required .NET 8 runtime is installed.
+* **.NET Runtime Check**: Verifies if the required .NET 9 runtime is installed.
 
 ## Requirements
 
 * **Node.js**: As this is a Node.js module.
-* **.NET 8 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 8 runtime to be installed. The module
+* **.NET 9 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 9 runtime to be installed. The module
   will check for this requirement. You can download it
-  from [https://dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0).
+  from [https://dotnet.microsoft.com/download/dotnet/9.0](https://dotnet.microsoft.com/download/dotnet/9.0).
 * **Administrative Privileges**: Some hardware data may not be accessible unless the application using this module is
   run with administrative privileges (e.g., "Run as administrator" on Windows, or using `sudo` on Linux/macOS).
 
@@ -178,10 +178,10 @@ async function main() {
             console.error('Raw Error:', monitorError.rawError);
         }
         // Check for the specific .NET runtime error message
-        if (monitorError.message && monitorError.message.includes('.NET 8 runtime')) { //
+        if (monitorError.message && monitorError.message.includes('.NET 9 runtime')) { //
             console.error(
-                "Please ensure .NET 8 runtime is installed. " +
-                "Download from: [https://dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0)" //
+                "Please ensure .NET 9 runtime is installed. " +
+                "Download from: [https://dotnet.microsoft.com/download/dotnet/9.0](https://dotnet.microsoft.com/download/dotnet/9.0)" //
             );
         }
         console.error('--- End Error in Main ---');
@@ -203,9 +203,9 @@ Creates a new instance of the hardware monitor.
 
 #### `async checkRequirements(targetDir: string): Promise<void>`
 
-Checks if the .NET 8 runtime is installed and downloads the necessary CLI tool to the specified `targetDir`. This
+Checks if the .NET 9 runtime is installed and downloads the necessary CLI tool to the specified `targetDir`. This
 directory is used to store different versions of the `LynxHardwareCLI`.
-Throws an error if .NET 8 is not found or if the CLI download fails.
+Throws an error if .NET 9 is not found or if the CLI download fails.
 
 #### `async getDataOnce(components?: ComponentType[], timeoutMs?: number): Promise<HardwareReport>`
 
@@ -242,12 +242,11 @@ Stops the currently active timed monitoring process.
 
 ### Types
 
-* **`ComponentType`**: `'cpu' | 'gpu' | 'memory' | 'motherboard' | 'storage' | 'network' | string`
+* **`ComponentType`**: `'cpu' | 'gpu' | 'memory' | 'motherboard' | 'storage' | 'network' | 'battery' | 'controller' | 'psu' | 'uptime'`
 * **`SensorInfo`**: `{ Name: string; Value: number | null; Type: string; Unit: string; Identifier: string; }`
 * **`HardwareItemInfo`**:
   `{ Name: string; HardwareType: string; Sensors: SensorInfo[]; SubHardware: HardwareItemInfo[]; }`
-* **`HardwareReport`**: Contains a `Timestamp` and arrays for `CPU`, `GPU`, `Memory`, `Motherboard`, `Storage`, and
-  `Network`, each being `HardwareItemInfo[]`.
+* **`HardwareReport`**: Contains a `Timestamp` and arrays for `CPU`, `GPU`, `Memory`, `Motherboard`, `Storage`, `Network`, `Battery`, `Controller` and `PSU`, each being `HardwareItemInfo[]`.
 * **`MonitorError`**:
   `Error & { type: 'spawn_error' | 'process_error' | 'json_parse_error' | 'timeout_error'; rawError?: any; stderrData?: string; }`
 
