@@ -3,3 +3,4 @@ node_modules/
 .prettierrc.json
 eslint.config.js
 tsconfig.json
+.idea
