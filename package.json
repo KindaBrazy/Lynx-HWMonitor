@@ -18,7 +18,8 @@
   "scripts": {
     "build": "tsc",
     "publishPackage": "npm run build && npm publish --access public",
-    "start": "npm run build && node dist/index.js"
+    "start": "npm run build && node dist/index.js",
+    "fix-linter": "prettier --write src --list-different && eslint --fix src"
   },
   "dependencies": {
     "decompress": "^4.2.1"
@@ -28,6 +29,8 @@
     "@types/decompress": "^4.2.7",
     "@types/node": "^25.9.1",
     "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
     "globals": "^17.6.0",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",

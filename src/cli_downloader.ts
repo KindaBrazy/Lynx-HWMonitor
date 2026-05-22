@@ -224,7 +224,7 @@ async function downloadAndExtractLatestCli(
       } else {
         log('error', 'An unexpected error occurred while finding a local fallback:', fsError.message);
       }
-      throw new Error(`No local versions of ${cliName} are available.`);
+      throw new Error(`No local versions of ${cliName} are available.`, {cause: fsError});
     }
   };
 
