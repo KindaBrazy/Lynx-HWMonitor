@@ -23,12 +23,12 @@ Motherboard, Storage, Network, Battery, Controller and PSU.
 * **Cross-Platform Support**: Detects OS (Windows, macOS, Linux) and architecture (x64, arm64) to download the
   appropriate CLI tool.
 * **Automatic CLI Management**: Downloads and manages the required `LynxHardwareCLI` from GitHub releases.
-* **.NET Runtime Check**: Verifies if the required .NET 9 runtime is installed.
+* **.NET Runtime Check**: Verifies if the required .NET 10.0 runtime is installed.
 
 ## Requirements
 
 * **Node.js**: As this is a Node.js module.
-* **.NET 9 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 9 runtime to be installed. The module
+* **.NET 10.0 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 10.0 runtime to be installed. The module
   will check for this requirement. You can download it
   from [https://dotnet.microsoft.com/download/dotnet/10.0](https://dotnet.microsoft.com/download/dotnet/10.0).
 * **Administrative Privileges**: Some hardware data may not be accessible unless the application using this module is
@@ -178,9 +178,9 @@ async function main() {
             console.error('Raw Error:', monitorError.rawError);
         }
         // Check for the specific .NET runtime error message
-        if (monitorError.message && monitorError.message.includes('.NET 9 runtime')) { //
+        if (monitorError.message && monitorError.message.includes('.NET 10.0 runtime')) { //
             console.error(
-                "Please ensure .NET 9 runtime is installed. " +
+                "Please ensure .NET 10.0 runtime is installed. " +
                 "Download from: [https://dotnet.microsoft.com/download/dotnet/10.0](https://dotnet.microsoft.com/download/dotnet/10.0)" //
             );
         }
@@ -203,9 +203,9 @@ Creates a new instance of the hardware monitor.
 
 #### `async checkRequirements(targetDir: string): Promise<void>`
 
-Checks if the .NET 9 runtime is installed and downloads the necessary CLI tool to the specified `targetDir`. This
+Checks if the .NET 10.0 runtime is installed and downloads the necessary CLI tool to the specified `targetDir`. This
 directory is used to store different versions of the `LynxHardwareCLI`.
-Throws an error if .NET 9 is not found or if the CLI download fails.
+Throws an error if .NET 10.0 is not found or if the CLI download fails.
 
 #### `async getDataOnce(components?: ComponentType[], timeoutMs?: number): Promise<HardwareReport>`
 
