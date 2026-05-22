@@ -30,7 +30,7 @@ Motherboard, Storage, Network, Battery, Controller and PSU.
 * **Node.js**: As this is a Node.js module.
 * **.NET 9 Runtime**: The companion CLI tool (`LynxHardwareCLI`) requires the .NET 9 runtime to be installed. The module
   will check for this requirement. You can download it
-  from [https://dotnet.microsoft.com/download/dotnet/9.0](https://dotnet.microsoft.com/download/dotnet/9.0).
+  from [https://dotnet.microsoft.com/download/dotnet/10.0](https://dotnet.microsoft.com/download/dotnet/10.0).
 * **Administrative Privileges**: Some hardware data may not be accessible unless the application using this module is
   run with administrative privileges (e.g., "Run as administrator" on Windows, or using `sudo` on Linux/macOS).
 
@@ -181,7 +181,7 @@ async function main() {
         if (monitorError.message && monitorError.message.includes('.NET 9 runtime')) { //
             console.error(
                 "Please ensure .NET 9 runtime is installed. " +
-                "Download from: [https://dotnet.microsoft.com/download/dotnet/9.0](https://dotnet.microsoft.com/download/dotnet/9.0)" //
+                "Download from: [https://dotnet.microsoft.com/download/dotnet/10.0](https://dotnet.microsoft.com/download/dotnet/10.0)" //
             );
         }
         console.error('--- End Error in Main ---');

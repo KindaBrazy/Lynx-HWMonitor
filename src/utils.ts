@@ -3,7 +3,7 @@ import {promisify} from 'node:util';
 
 const execAsync = promisify(exec);
 const DOTNET_LIST_RUNTIMES_COMMAND = 'dotnet --list-runtimes';
-const DOTNET_9_RUNTIME_IDENTIFIER = 'microsoft.netcore.app 9.0';
+const DOTNET_9_RUNTIME_IDENTIFIER = 'microsoft.netcore.app 10.0';
 
 function isDotNet9RuntimeInstalled(output: string): boolean {
   return output.toLowerCase().includes(DOTNET_9_RUNTIME_IDENTIFIER);

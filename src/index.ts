@@ -147,7 +147,7 @@ export default class HardwareMonitor extends EventEmitter {
     const isDotNetInstalled = await checkDotNetRuntime9(logger);
     if (!isDotNetInstalled) {
       throw new Error(
-        '.NET 9 runtime not found. Please install it from https://dotnet.microsoft.com/download/dotnet/9.0',
+        '.NET 10.0 runtime not found. Please install it from https://dotnet.microsoft.com/download/dotnet/10.0',
       );
     }
     this.executablePath = await DownloadCli(targetDir, this.logLevel);
