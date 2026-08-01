@@ -1,0 +1,5 @@
+{
+  "format": ["group", "time"],
+  "install": "prompt",
+  "interactive": true
+}
