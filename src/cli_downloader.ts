@@ -2,8 +2,11 @@ import os from 'node:os';
 import fsPromises from 'node:fs/promises';
 import originalFs from 'node:fs';
 import path from 'node:path';
-import https from 'node:https';
+import {exec} from 'node:child_process';
+import {promisify} from 'node:util';
 import decompress from 'decompress';
+
+const execAsync = promisify(exec);
 
 type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
 const logLevels: LogLevel[] = ['silent', 'error', 'warn', 'info', 'debug'];
@@ -31,158 +34,131 @@ type GitHubRelease = {
 };
 
 /**
- * Downloads a file from a given URL using Node.js https module.
- * Handles redirects.
- * @param url The URL to download from.
- * @param outputPath The path to save the downloaded file.
+ * Attempts to terminate any running instances of the CLI tool process to unlock files on Windows/Unix.
+ * @param cliName The base name of the CLI executable.
  * @param log The logger function.
- * @param redirectCount The current redirect count (internal use).
- * @returns A promise that resolves when the download is complete.
  */
-function downloadFile(url: string, outputPath: string, log: Logger, redirectCount = 0): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (redirectCount > 5) {
-      reject(new Error('Too many redirects'));
-      return;
+async function killRunningCliProcesses(cliName: string, log: Logger): Promise<void> {
+  const platform = os.platform();
+  const exeName = platform === 'win32' ? `${cliName}.exe` : cliName;
+  try {
+    if (platform === 'win32') {
+      await execAsync(`taskkill /F /IM "${exeName}"`);
+    } else {
+      await execAsync(`pkill -9 -f "${cliName}"`);
     }
-
-    const headers: Record<string, string> = {
-      'User-Agent': 'Node.js-Downloader',
-      Accept: 'application/octet-stream',
-    };
-
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const request = https.get(url, {headers}, response => {
-      if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
-        const rawLocation = response.headers.location;
-        if (!rawLocation) {
-          reject(new Error(`Redirect with no location header from ${url}`));
-          return;
-        }
-        const redirectUrl = new URL(rawLocation, url).toString();
-        log('debug', `Redirecting to ${redirectUrl}`);
-        response.resume();
-        downloadFile(redirectUrl, outputPath, log, redirectCount + 1)
-          .then(resolve)
-          .catch(reject);
-        return;
-      }
-
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`Failed to download file: ${response.statusCode} ${response.statusMessage} from ${url}`));
-        return;
-      }
-
-      const contentLengthHeader = response.headers['content-length'];
-      const expectedBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
-      let downloadedBytes = 0;
-
-      const fileStream = originalFs.createWriteStream(outputPath);
-
-      response.on('data', chunk => {
-        downloadedBytes += chunk.length;
-      });
-
-      response.pipe(fileStream);
-
-      fileStream.on('finish', () => {
-        fileStream.close(() => {
-          if (expectedBytes !== null && downloadedBytes !== expectedBytes) {
-            originalFs.unlink(outputPath, () => {});
-            reject(
-              new Error(`Download truncated: expected ${expectedBytes} bytes, but received ${downloadedBytes} bytes.`),
-            );
-            return;
-          }
-          resolve();
-        });
-      });
-
-      fileStream.on('error', err => {
-        originalFs.unlink(outputPath, () => {});
-        reject(err);
-      });
-
-      response.on('error', err => {
-        originalFs.unlink(outputPath, () => {});
-        reject(err);
-      });
-    });
-
-    request.on('error', err => {
-      reject(err);
-    });
-
-    request.end();
-  });
+    log('debug', `Terminated running instances of ${exeName}`);
+  } catch {
+    // Process was not running or couldn't be killed; ignore
+  }
 }
 
 /**
- * Fetches JSON data from a URL using Node.js https module.
+ * Safely removes a directory, attempting process termination and retries if files are locked (EPERM/EBUSY).
+ * @param dirPath Path to the directory to remove.
+ * @param cliName Name of the CLI for process termination if locked.
+ * @param log Logger function.
+ * @param maxRetries Maximum number of deletion attempts.
+ */
+async function safeRemoveDir(dirPath: string, cliName: string, log: Logger, maxRetries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fsPromises.rm(dirPath, {recursive: true, force: true});
+      return;
+    } catch (error: any) {
+      if (['EPERM', 'EBUSY', 'EACCES'].includes(error.code)) {
+        log(
+          'warn',
+          `Attempt ${attempt}/${maxRetries} to remove ${dirPath} failed (${error.code}).` +
+            ' Stopping running CLI process...',
+        );
+        await killRunningCliProcesses(cliName, log);
+        await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+      } else {
+        throw error;
+      }
+    }
+  }
+  // Final attempt
+  await fsPromises.rm(dirPath, {recursive: true, force: true});
+}
+
+/**
+ * Downloads a file from a given URL using Node.js native fetch API.
+ * Automatically handles redirects and validates file size.
+ * @param url The URL to download from.
+ * @param outputPath The path to save the downloaded file.
+ * @param log The logger function.
+ */
+async function downloadFile(url: string, outputPath: string, log: Logger): Promise<void> {
+  const headers: Record<string, string> = {
+    'User-Agent': 'Node.js-Downloader',
+    Accept: 'application/octet-stream',
+  };
+
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  log('debug', `Fetching download stream from ${url}`);
+  const response = await fetch(url, {headers, redirect: 'follow'});
+  if (!response.ok) {
+    throw new Error(`Failed to download file: ${response.status} ${response.statusText} from ${url}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const contentLengthHeader = response.headers.get('content-length');
+  if (contentLengthHeader) {
+    const expectedBytes = parseInt(contentLengthHeader, 10);
+    if (!isNaN(expectedBytes) && buffer.length !== expectedBytes) {
+      throw new Error(`Download truncated: expected ${expectedBytes} bytes, but received ${buffer.length} bytes.`);
+    }
+  }
+
+  await fsPromises.writeFile(outputPath, buffer);
+}
+
+/**
+ * Fetches JSON data from a URL using Node.js native fetch API.
  * @param url The URL to fetch JSON from.
  * @returns A promise that resolves with the parsed JSON data.
  */
-function fetchJson<T>(url: string, redirectCount = 0): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    if (redirectCount > 5) {
-      reject(new Error('Too many redirects while fetching JSON'));
-      return;
-    }
+async function fetchJson<T>(url: string): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github.v3+json',
+    'User-Agent': 'Node.js-Downloader',
+  };
 
-    const headers: Record<string, string> = {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'Node.js-Downloader',
-    };
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
+  const response = await fetch(url, {headers, redirect: 'follow'});
+  if (!response.ok) {
+    throw new Error(`Failed to fetch JSON: ${response.status} ${response.statusText} from ${url}`);
+  }
 
-    https
-      .get(url, {headers}, response => {
-        if ([301, 302, 307, 308].includes(response.statusCode ?? 0)) {
-          const redirectUrl = response.headers.location;
-          if (!redirectUrl) {
-            reject(new Error(`Redirect with no location header from ${url}`));
-            return;
-          }
-          response.resume();
-          fetchJson<T>(redirectUrl, redirectCount + 1)
-            .then(resolve)
-            .catch(reject);
-          return;
-        }
+  return (await response.json()) as T;
+}
 
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to fetch JSON: ${response.statusCode} ${response.statusMessage} from ${url}`));
-          response.resume();
-          return;
-        }
+/**
+ * Verifies that a directory contains all required files for running the CLI tool (.exe, .runtimeconfig.json, and .dll).
+ * @param dirPath The directory path to check.
+ * @param cliName The base name of the CLI tool.
+ * @param executableName The name of the executable file.
+ */
+async function verifyCliFiles(dirPath: string, cliName: string, executableName: string): Promise<void> {
+  const exePath = path.join(dirPath, executableName);
+  const runtimeConfigPath = path.join(dirPath, `${cliName}.runtimeconfig.json`);
+  const dllPath = path.join(dirPath, `${cliName}.dll`);
 
-        let rawData = '';
-        response.setEncoding('utf8');
-        response.on('data', chunk => {
-          rawData += chunk;
-        });
-        response.on('end', () => {
-          try {
-            const parsedData = JSON.parse(rawData);
-            resolve(parsedData as T);
-          } catch (e) {
-            reject(e);
-          }
-        });
-      })
-      .on('error', err => {
-        reject(err);
-      });
-  });
+  await fsPromises.access(exePath, originalFs.constants.F_OK);
+  await fsPromises.access(runtimeConfigPath, originalFs.constants.F_OK);
+  await fsPromises.access(dllPath, originalFs.constants.F_OK);
 }
 
 /**
@@ -205,7 +181,7 @@ async function cleanupOldVersions(
     for (const dirent of oldVersionDirs) {
       const oldVersionPath = path.join(baseDir, dirent.name);
       log('debug', `Removing old version directory: ${oldVersionPath}`);
-      await fsPromises.rm(oldVersionPath, {recursive: true, force: true});
+      await safeRemoveDir(oldVersionPath, cliName, log);
     }
   } catch (error) {
     log('warn', `Could not clean up old versions in ${baseDir}:`, (error as Error).message);
@@ -252,13 +228,12 @@ async function downloadAndExtractLatestCli(
       for (const dirent of dirents) {
         if (dirent.isDirectory()) {
           const candidatePath = path.join(baseDestinationDir, dirent.name);
-          const exePath = path.join(candidatePath, executableName);
           try {
-            await fsPromises.access(exePath, originalFs.constants.F_OK);
+            await verifyCliFiles(candidatePath, cliName, executableName);
             validVersionDirs.push(dirent.name);
           } catch {
             log('warn', `Removing invalid/incomplete local version directory: ${candidatePath}`);
-            await fsPromises.rm(candidatePath, {recursive: true, force: true}).catch(() => {});
+            await safeRemoveDir(candidatePath, cliName, log).catch(() => {});
           }
         }
       }
@@ -300,14 +275,14 @@ async function downloadAndExtractLatestCli(
     const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
 
     try {
-      await fsPromises.access(path.join(finalExtractionPath, executableName), originalFs.constants.F_OK);
+      await verifyCliFiles(finalExtractionPath, cliName, executableName);
       log('info', `Latest version '${versionString}' already exists and is valid. Skipping download.`);
       await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
       return finalExtractionPath;
     } catch {
       log('info', `New version '${versionString}' not found or incomplete locally. Proceeding with download.`);
       // Clean up incomplete directory if present
-      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true}).catch(() => {});
+      await safeRemoveDir(finalExtractionPath, cliName, log).catch(() => {});
     }
 
     const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
@@ -331,23 +306,29 @@ async function downloadAndExtractLatestCli(
       await fsPromises.mkdir(tempExtractionPath, {recursive: true});
       await decompress(zipFilePath, tempExtractionPath);
 
-      // Verify executable exists in extracted contents
-      const extractedExePath = path.join(tempExtractionPath, executableName);
-      await fsPromises.access(extractedExePath, originalFs.constants.F_OK);
-      log('debug', 'Extraction and executable verification complete.');
+      // Verify executable and required runtime configuration files exist in extracted contents
+      await verifyCliFiles(tempExtractionPath, cliName, executableName);
+      log('debug', 'Extraction and file verification complete.');
 
       // Safely move extracted directory to final target location
       await fsPromises.mkdir(baseDestinationDir, {recursive: true});
-      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true});
-      await fsPromises.rename(tempExtractionPath, finalExtractionPath);
+      await safeRemoveDir(finalExtractionPath, cliName, log);
+
+      try {
+        await fsPromises.rename(tempExtractionPath, finalExtractionPath);
+      } catch {
+        // Fallback to copy if rename fails due to permissions or cross-device mount
+        await fsPromises.mkdir(finalExtractionPath, {recursive: true});
+        await fsPromises.cp(tempExtractionPath, finalExtractionPath, {recursive: true, force: true});
+      }
 
       await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
     } catch (extractionError) {
       // Cleanup target path if partially created
-      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true}).catch(() => {});
+      await safeRemoveDir(finalExtractionPath, cliName, log).catch(() => {});
       throw extractionError;
     } finally {
-      await fsPromises.rm(tempDownloadDir, {recursive: true, force: true}).catch(() => {});
+      await safeRemoveDir(tempDownloadDir, cliName, log).catch(() => {});
     }
 
     log('info', `${cliName} is ready at ${finalExtractionPath}`);
@@ -380,8 +361,8 @@ export default async function DownloadCli(targetDir: string, logLevel: LogLevel 
     const executablePath = path.join(extractedPath, executableName);
     log('debug', `Executable should be at: ${executablePath}`);
 
-    await fsPromises.access(executablePath, originalFs.constants.F_OK);
-    log('debug', `Executable ${executablePath} verified.`);
+    await verifyCliFiles(extractedPath, cliName, executableName);
+    log('debug', `Executable and configuration files verified at: ${extractedPath}`);
     return executablePath;
   } catch (error) {
     log('error', 'An error occurred during CLI download and setup:', (error as Error).message);
