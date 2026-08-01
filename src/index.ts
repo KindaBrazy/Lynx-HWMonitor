@@ -299,14 +299,20 @@ export default class HardwareMonitor extends EventEmitter {
       this.buffer += dataChunk.toString();
 
       if (!this.initialMessageSkipped) {
-        const newlineIndex = this.buffer.indexOf('\r\n');
+        const newlineIndex = this.buffer.indexOf('\n');
         if (newlineIndex !== -1) {
           const firstLine = this.buffer.substring(0, newlineIndex);
-          if (!firstLine.startsWith('{')) {
-            this.buffer = this.buffer.substring(newlineIndex + 2);
+          if (!firstLine.trim().startsWith('{')) {
+            this.buffer = this.buffer.substring(newlineIndex + 1);
           }
           this.initialMessageSkipped = true;
         } else if (this.buffer.length > 1024 && !this.buffer.includes('{')) {
+          const nextJsonStartIndex = this.buffer.indexOf('{');
+          if (nextJsonStartIndex !== -1) {
+            this.buffer = this.buffer.substring(nextJsonStartIndex);
+          } else {
+            this.buffer = '';
+          }
           this.initialMessageSkipped = true;
         } else {
           return;
@@ -315,13 +321,25 @@ export default class HardwareMonitor extends EventEmitter {
 
       if (!this.initialMessageSkipped) return;
 
+      const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB safety limit
+
       while (this.buffer.length > 0) {
+        if (this.buffer.length > MAX_BUFFER_SIZE) {
+          this.buffer = '';
+          const err: MonitorError = new Error(
+            'Buffer overflow: exceeded maximum buffer size without a valid JSON object. Resetting buffer.',
+          ) as MonitorError;
+          err.type = 'json_parse_error';
+          this.emit('error', err);
+          break;
+        }
+
         if (!this.buffer.startsWith('{')) {
           const nextJsonStartIndex = this.buffer.indexOf('{');
           if (nextJsonStartIndex !== -1) {
             this.buffer = this.buffer.substring(nextJsonStartIndex);
           } else {
-            if (this.buffer.trim() === '') this.buffer = '';
+            this.buffer = '';
             break;
           }
         }
