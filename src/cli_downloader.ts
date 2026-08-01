@@ -42,48 +42,73 @@ type GitHubRelease = {
 function downloadFile(url: string, outputPath: string, log: Logger, redirectCount = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     if (redirectCount > 5) {
-      // Max 5 redirects
       reject(new Error('Too many redirects'));
       return;
     }
 
-    const request = https.get(url, response => {
-      // Handle redirects
-      if (response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 307) {
-        if (!response.headers.location) {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Node.js-Downloader',
+      Accept: 'application/octet-stream',
+    };
+
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const request = https.get(url, {headers}, response => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+        const rawLocation = response.headers.location;
+        if (!rawLocation) {
           reject(new Error(`Redirect with no location header from ${url}`));
           return;
         }
-        log('debug', `Redirecting to ${response.headers.location}`);
-        // Consume response data to free up memory
+        const redirectUrl = new URL(rawLocation, url).toString();
+        log('debug', `Redirecting to ${redirectUrl}`);
         response.resume();
-        downloadFile(response.headers.location, outputPath, log, redirectCount + 1)
+        downloadFile(redirectUrl, outputPath, log, redirectCount + 1)
           .then(resolve)
           .catch(reject);
         return;
       }
 
       if (response.statusCode !== 200) {
-        // Consume response data to free up memory
         response.resume();
         reject(new Error(`Failed to download file: ${response.statusCode} ${response.statusMessage} from ${url}`));
         return;
       }
 
+      const contentLengthHeader = response.headers['content-length'];
+      const expectedBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
+      let downloadedBytes = 0;
+
       const fileStream = originalFs.createWriteStream(outputPath);
+
+      response.on('data', chunk => {
+        downloadedBytes += chunk.length;
+      });
+
       response.pipe(fileStream);
 
       fileStream.on('finish', () => {
-        fileStream.close(() => resolve());
+        fileStream.close(() => {
+          if (expectedBytes !== null && downloadedBytes !== expectedBytes) {
+            originalFs.unlink(outputPath, () => {});
+            reject(
+              new Error(`Download truncated: expected ${expectedBytes} bytes, but received ${downloadedBytes} bytes.`),
+            );
+            return;
+          }
+          resolve();
+        });
       });
 
       fileStream.on('error', err => {
-        originalFs.unlink(outputPath, () => {}); // Attempt to delete partial file
+        originalFs.unlink(outputPath, () => {});
         reject(err);
       });
 
       response.on('error', err => {
-        // Handle errors on the response stream
         originalFs.unlink(outputPath, () => {});
         reject(err);
       });
