@@ -102,39 +102,58 @@ function downloadFile(url: string, outputPath: string, log: Logger, redirectCoun
  * @param url The URL to fetch JSON from.
  * @returns A promise that resolves with the parsed JSON data.
  */
-function fetchJson<T>(url: string): Promise<T> {
+function fetchJson<T>(url: string, redirectCount = 0): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('Too many redirects while fetching JSON'));
+      return;
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github.v3+json',
+      'User-Agent': 'Node.js-Downloader',
+    };
+
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     https
-      .get(
-        url,
-        {
-          headers: {
-            Accept: 'application/vnd.github.v3+json',
-            'User-Agent': 'Node.js-Downloader', // GitHub API requires a User-Agent
-          },
-        },
-        response => {
-          if (response.statusCode !== 200) {
-            reject(new Error(`Failed to fetch JSON: ${response.statusCode} ${response.statusMessage} from ${url}`));
-            response.resume(); // Consume data to free resources
+      .get(url, {headers}, response => {
+        if ([301, 302, 307, 308].includes(response.statusCode ?? 0)) {
+          const redirectUrl = response.headers.location;
+          if (!redirectUrl) {
+            reject(new Error(`Redirect with no location header from ${url}`));
             return;
           }
+          response.resume();
+          fetchJson<T>(redirectUrl, redirectCount + 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
 
-          let rawData = '';
-          response.setEncoding('utf8');
-          response.on('data', chunk => {
-            rawData += chunk;
-          });
-          response.on('end', () => {
-            try {
-              const parsedData = JSON.parse(rawData);
-              resolve(parsedData as T);
-            } catch (e) {
-              reject(e);
-            }
-          });
-        },
-      )
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to fetch JSON: ${response.statusCode} ${response.statusMessage} from ${url}`));
+          response.resume();
+          return;
+        }
+
+        let rawData = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => {
+          rawData += chunk;
+        });
+        response.on('end', () => {
+          try {
+            const parsedData = JSON.parse(rawData);
+            resolve(parsedData as T);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      })
       .on('error', err => {
         reject(err);
       });
@@ -201,7 +220,7 @@ async function downloadAndExtractLatestCli(
     throw new Error(`Unsupported architecture: ${arch}`);
   }
 
-  const fallbackToLocalVersion = async (): Promise<string> => {
+  const fallbackToLocalVersion = async (downloadErr?: Error): Promise<string> => {
     try {
       const dirents = await fsPromises.readdir(baseDestinationDir, {withFileTypes: true});
       const versionDirs = dirents
@@ -217,14 +236,16 @@ async function downloadAndExtractLatestCli(
       }
 
       log('error', `No local versions of ${cliName} found in ${baseDestinationDir}.`);
-      throw new Error(`No local versions of ${cliName} are available.`);
+      const reason = downloadErr ? ` (Download error: ${downloadErr.message})` : '';
+      throw new Error(`No local versions of ${cliName} are available.${reason}`);
     } catch (fsError: any) {
       if (fsError.code === 'ENOENT') {
         log('error', `Destination directory ${baseDestinationDir} does not exist.`);
       } else {
         log('error', 'An unexpected error occurred while finding a local fallback:', fsError.message);
       }
-      throw new Error(`No local versions of ${cliName} are available.`, {cause: fsError});
+      const reason = downloadErr ? ` (Download error: ${downloadErr.message})` : '';
+      throw new Error(`No local versions of ${cliName} are available.${reason}`, {cause: fsError});
     }
   };
 
@@ -279,12 +300,9 @@ async function downloadAndExtractLatestCli(
     log('info', `${cliName} is ready at ${finalExtractionPath}`);
     return finalExtractionPath;
   } catch (error) {
-    log(
-      'warn',
-      'An error occurred during setup. Attempting to use a local version as fallback.',
-      (error as Error).message,
-    );
-    return await fallbackToLocalVersion();
+    const err = error as Error;
+    log('warn', 'An error occurred during setup. Attempting to use a local version as fallback.', err.message);
+    return await fallbackToLocalVersion(err);
   }
 }
 
@@ -296,8 +314,8 @@ async function downloadAndExtractLatestCli(
  */
 export default async function DownloadCli(targetDir: string, logLevel: LogLevel = 'info'): Promise<string> {
   const log = createLogger(logLevel);
-  const repoOwner = 'KindaBrazy';
-  const repoName = 'LynxHardwareCLI';
+  const repoOwner = 'TheLynxHub';
+  const repoName = 'Lynx-HardwareCLI';
   const cliName = 'LynxHardwareCLI';
   const cliBaseDir = path.join(targetDir, cliName);
 
