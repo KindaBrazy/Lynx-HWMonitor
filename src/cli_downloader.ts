@@ -175,9 +175,7 @@ async function cleanupOldVersions(
 ): Promise<void> {
   try {
     const entries = await fsPromises.readdir(baseDir, {withFileTypes: true});
-    const oldVersionDirs = entries.filter(
-      dirent => dirent.isDirectory() && dirent.name.startsWith(`${cliName}-`) && dirent.name !== currentVersion,
-    );
+    const oldVersionDirs = entries.filter(dirent => dirent.isDirectory() && dirent.name !== currentVersion);
 
     for (const dirent of oldVersionDirs) {
       const oldVersionPath = path.join(baseDir, dirent.name);
@@ -211,6 +209,7 @@ async function downloadAndExtractLatestCli(
   const arch = os.arch();
   const osIdentifier = platform === 'win32' ? 'win' : platform === 'darwin' ? 'osx' : 'linux';
   const archIdentifier = arch === 'x64' ? 'x64' : 'arm64';
+  const executableName = platform === 'win32' ? `${cliName}.exe` : cliName;
   log('debug', `Detected system: ${osIdentifier}-${archIdentifier}`);
 
   if (!['win', 'osx', 'linux'].includes(osIdentifier)) {
@@ -223,13 +222,26 @@ async function downloadAndExtractLatestCli(
   const fallbackToLocalVersion = async (downloadErr?: Error): Promise<string> => {
     try {
       const dirents = await fsPromises.readdir(baseDestinationDir, {withFileTypes: true});
-      const versionDirs = dirents
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name)
-        .sort((a, b) => b.localeCompare(a, undefined, {numeric: true, sensitivity: 'base'}));
+      const validVersionDirs: string[] = [];
 
-      if (versionDirs.length > 0) {
-        const latestLocalVersion = versionDirs[0];
+      for (const dirent of dirents) {
+        if (dirent.isDirectory()) {
+          const candidatePath = path.join(baseDestinationDir, dirent.name);
+          const exePath = path.join(candidatePath, executableName);
+          try {
+            await fsPromises.access(exePath, originalFs.constants.F_OK);
+            validVersionDirs.push(dirent.name);
+          } catch {
+            log('warn', `Removing invalid/incomplete local version directory: ${candidatePath}`);
+            await fsPromises.rm(candidatePath, {recursive: true, force: true}).catch(() => {});
+          }
+        }
+      }
+
+      validVersionDirs.sort((a, b) => b.localeCompare(a, undefined, {numeric: true, sensitivity: 'base'}));
+
+      if (validVersionDirs.length > 0) {
+        const latestLocalVersion = validVersionDirs[0];
         const fallbackPath = path.join(baseDestinationDir, latestLocalVersion);
         log('info', `Found existing local version. Using latest available '${latestLocalVersion}' as a fallback.`);
         return fallbackPath;
@@ -263,12 +275,14 @@ async function downloadAndExtractLatestCli(
     const finalExtractionPath = path.resolve(baseDestinationDir, versionString);
 
     try {
-      await fsPromises.access(finalExtractionPath);
-      log('info', `Latest version '${versionString}' already exists. Skipping download.`);
+      await fsPromises.access(path.join(finalExtractionPath, executableName), originalFs.constants.F_OK);
+      log('info', `Latest version '${versionString}' already exists and is valid. Skipping download.`);
       await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
       return finalExtractionPath;
     } catch {
-      log('info', `New version '${versionString}' not found locally. Proceeding with download.`);
+      log('info', `New version '${versionString}' not found or incomplete locally. Proceeding with download.`);
+      // Clean up incomplete directory if present
+      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true}).catch(() => {});
     }
 
     const expectedAssetName = `${cliName}-${osIdentifier}-${archIdentifier}-${versionString}.zip`;
@@ -282,19 +296,33 @@ async function downloadAndExtractLatestCli(
 
     const tempDownloadDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), `${cliName}-download-`));
     const zipFilePath = path.join(tempDownloadDir, targetAsset.name);
+    const tempExtractionPath = path.join(tempDownloadDir, 'extracted');
 
     try {
       log('debug', `Downloading ${targetAsset.name} to ${zipFilePath}...`);
       await downloadFile(targetAsset.browser_download_url, zipFilePath, log);
 
-      log('debug', `Extracting ${zipFilePath} to ${finalExtractionPath}...`);
-      await fsPromises.mkdir(finalExtractionPath, {recursive: true});
-      await decompress(zipFilePath, finalExtractionPath);
-      log('debug', 'Extraction complete.');
+      log('debug', `Extracting ${zipFilePath}...`);
+      await fsPromises.mkdir(tempExtractionPath, {recursive: true});
+      await decompress(zipFilePath, tempExtractionPath);
+
+      // Verify executable exists in extracted contents
+      const extractedExePath = path.join(tempExtractionPath, executableName);
+      await fsPromises.access(extractedExePath, originalFs.constants.F_OK);
+      log('debug', 'Extraction and executable verification complete.');
+
+      // Safely move extracted directory to final target location
+      await fsPromises.mkdir(baseDestinationDir, {recursive: true});
+      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true});
+      await fsPromises.rename(tempExtractionPath, finalExtractionPath);
 
       await cleanupOldVersions(baseDestinationDir, versionString, cliName, log);
+    } catch (extractionError) {
+      // Cleanup target path if partially created
+      await fsPromises.rm(finalExtractionPath, {recursive: true, force: true}).catch(() => {});
+      throw extractionError;
     } finally {
-      await fsPromises.rm(tempDownloadDir, {recursive: true, force: true});
+      await fsPromises.rm(tempDownloadDir, {recursive: true, force: true}).catch(() => {});
     }
 
     log('info', `${cliName} is ready at ${finalExtractionPath}`);
